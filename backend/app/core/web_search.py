@@ -99,6 +99,11 @@ class WebSearcher:
                 )
                 response.raise_for_status()
                 data = response.json()
+                try:
+                    from app.core.provider_usage import record_provider_call
+                    await record_provider_call("tavily")
+                except Exception:
+                    pass
 
                 for result in data.get("results", []):
                     url = result.get("url", "")

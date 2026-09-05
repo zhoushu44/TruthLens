@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.api import analytics, detect, chat, documents, conversations
+from app.api import analytics, detect, chat, documents, conversations, apikeys, openai_compat, settings
 
 # ── Logging ───────────────────────────────────────────────────────────────
 
@@ -35,12 +35,12 @@ async def lifespan(app: FastAPI):
 
     settings = get_settings()
 
-    # Load NLI model (DeBERTa-v3-base)
+    # Load NLI (Groq judge by default, local DeBERTa fallback)
     try:
         from app.core.nli_model import get_nli_model
         nli_model = get_nli_model()
         nli_model.load()
-        logger.info(f"✅ NLI Model loaded: {settings.nli_model_name} on {settings.nli_device}")
+        logger.info(f"✅ NLI ready: {nli_model.describe()}")
     except Exception as e:
         logger.warning(f"⚠️  NLI Model failed to load: {e}")
         logger.warning("   Detection will work but NLI verification will be disabled")
@@ -87,6 +87,44 @@ async def lifespan(app: FastAPI):
         bool(settings.openrouter_api_key),
     ])
     logger.info(f"📊 {available}/3 LLM providers configured")
+    try:
+        from sqlalchemy import text as _sa_text
+        from app.db.engine import engine as _engine
+        async with _engine.begin() as _conn:
+            await _conn.execute(_sa_text("""CREATE TABLE IF NOT EXISTS api_keys (
+              id VARCHAR(36) PRIMARY KEY,
+              name VARCHAR(200) NOT NULL DEFAULT 'default',
+              prefix VARCHAR(20) NOT NULL,
+              key_hash VARCHAR(128) NOT NULL UNIQUE,
+              is_active BOOLEAN NOT NULL DEFAULT TRUE,
+              expires_at TIMESTAMPTZ NULL,
+              usage_count INTEGER NOT NULL DEFAULT 0,
+              last_used_at TIMESTAMPTZ NULL,
+              created_at TIMESTAMPTZ NULL DEFAULT NOW()
+            )"""))
+            await _conn.execute(_sa_text("CREATE INDEX IF NOT EXISTS ix_api_keys_prefix ON api_keys (prefix)"))
+            await _conn.execute(_sa_text("""CREATE TABLE IF NOT EXISTS provider_usage (
+              provider VARCHAR(50) PRIMARY KEY,
+              calls INTEGER NOT NULL DEFAULT 0,
+              last_used_at TIMESTAMPTZ NULL
+            )"""))
+            # 独立检测行归属模型用（无会话直调也落库统计）
+            await _conn.execute(_sa_text("ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS model_id VARCHAR(100)"))
+            # 全局知识库（无会话）上传：documents.conversation_id 必须允许 NULL
+            # （老库由 001 迁移建成 NOT NULL；与 ORM nullable=True 不一致，启动时自愈）
+            await _conn.execute(_sa_text("ALTER TABLE documents ALTER COLUMN conversation_id DROP NOT NULL"))
+        logger.info("API Keys table ready")
+    except Exception as _e:
+        logger.warning(f"API Keys table init skipped: {_e}")
+    try:
+        if settings.truthlens_api_key:
+            logger.info("Master API Key configured (TRUTHLENS_API_KEY)")
+        else:
+            logger.warning("TRUTHLENS_API_KEY not set — external calls run in compatible-open mode")
+        if settings.api_key_required:
+            logger.info("API_KEY_REQUIRED=True — detect/chat require valid Key")
+    except Exception:
+        pass
 
     logger.info("=" * 60)
     logger.info("🚀 Server ready!")
@@ -129,6 +167,9 @@ app.include_router(chat.router, prefix="/api/v1", tags=["Chat"])
 app.include_router(documents.router, prefix="/api/v1", tags=["Documents"])
 app.include_router(conversations.router, prefix="/api/v1", tags=["Conversations"])
 app.include_router(analytics.router, prefix="/api/v1", tags=["Analytics"])
+app.include_router(apikeys.router, prefix="/api/v1", tags=["API Keys"])
+app.include_router(settings.router, prefix="/api/v1", tags=["Settings"])
+app.include_router(openai_compat.router, prefix="/v1", tags=["OpenAI-Compatible"])
 
 
 # ── Health Check ──────────────────────────────────────────────────────────
@@ -149,8 +190,7 @@ async def health_check():
         "components": {
             "nli_model": {
                 "loaded": nli.is_loaded,
-                "model": settings.nli_model_name,
-                "device": settings.nli_device,
+                **nli.describe(),
             },
             "ner_model": {
                 "loaded": ner.is_loaded,
@@ -164,14 +204,15 @@ async def health_check():
                 "priority": "groq > nvidia > openrouter",
             },
             "web_search": {
-                "available": settings.tavily_api_key is not None,
+                "available": bool(settings.tavily_api_key),
                 "provider": "tavily",
                 "enabled": settings.web_search_enabled,
             },
             "llm_providers": {
-                "groq": settings.groq_api_key is not None,
-                "nvidia": settings.nvidia_api_key is not None,
-                "openrouter": settings.openrouter_api_key is not None,
+                "groq": bool(settings.groq_api_key),
+                "nvidia": bool(settings.nvidia_api_key),
+                "openrouter": bool(settings.openrouter_api_key),
+                "zen": bool(settings.zen_api_key),
             },
         },
         "supported_models": list(settings.supported_models.keys()),
@@ -187,7 +228,7 @@ async def list_models():
         api_key_field = info.get("api_key_field")
         is_available = (
             api_key_field is None
-            or getattr(settings, api_key_field, None) is not None
+            or bool(getattr(settings, api_key_field, None))
         )
         if not is_available:
             continue
@@ -199,3 +240,42 @@ async def list_models():
             "description": info.get("description", ""),
         })
     return {"models": models}
+
+
+
+# ── 单端口部署：同 6655 端口同时提供 WebUI + API ─────────────
+# Docker 构建时会把 frontend/dist 拷到 ../frontend_dist，存在就挂载
+try:
+    import os as _os
+    from fastapi.responses import FileResponse as _FileResponse
+    from fastapi.staticfiles import StaticFiles as _StaticFiles
+    _here = _os.path.dirname(__file__)
+    _candidates = [
+        _os.path.join(_here, "..", "..", "frontend_dist"),
+        _os.path.join(_here, "..", "frontend_dist"),
+        "/app/frontend_dist",
+        "/app/../frontend/dist",
+        _os.path.join(_os.getcwd(), "frontend_dist"),
+    ]
+    _dist = next((p for p in _candidates if p and _os.path.isdir(p) and _os.path.isfile(_os.path.join(p, "index.html"))), None)
+    if _dist:
+        _assets = _os.path.join(_dist, "assets")
+        if _os.path.isdir(_assets):
+            app.mount("/assets", _StaticFiles(directory=_assets), name="web-assets")
+
+        @app.get("/", include_in_schema=False)
+        async def _serve_index():
+            return _FileResponse(_os.path.join(_dist, "index.html"))
+
+        @app.get("/{full_path:path}", include_in_schema=False)
+        async def _serve_spa(full_path: str):
+            if full_path.startswith(("api/", "v1/", "health", "docs", "openapi.json", "assets/")):
+                from fastapi import HTTPException as _HTTP
+                raise _HTTP(status_code=404)
+            _fp = _os.path.join(_dist, full_path)
+            if full_path and _os.path.isfile(_fp):
+                return _FileResponse(_fp)
+            return _FileResponse(_os.path.join(_dist, "index.html"))
+except Exception:
+    pass
+

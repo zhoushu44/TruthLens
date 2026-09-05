@@ -50,14 +50,24 @@ class RiskScorer:
             - >60% UNVERIFIED ratio → +10
             - All VERIFIED → cap at 20
         """
-        # Filter to scoreable claims (exclude OPINION, SKIPPED)
+        # Filter to scoreable claims (exclude OPINION, SKIPPED).
+        # UNVERIFIABLE_SOURCE ("判不了", e.g. source link 403) is abstained:
+        # it only surfaces as a warning, never inflates the numeric score
+        # (same idea as RefChecker's Abstain category).
         scoreable = [
             r for r in results
-            if r.status not in (ClaimStatus.SKIPPED, ClaimStatus.OPINION)
+            if r.status not in (
+                ClaimStatus.SKIPPED,
+                ClaimStatus.OPINION,
+                ClaimStatus.UNVERIFIABLE_SOURCE,
+            )
+        ]
+        unverifiable = [
+            r for r in results if r.status == ClaimStatus.UNVERIFIABLE_SOURCE
         ]
 
         if not scoreable:
-            return 0.0
+            return 55.0 if unverifiable else 0.0
 
         # Weighted average by importance
         total_weight = sum(r.claim.importance for r in scoreable)
@@ -143,8 +153,17 @@ class RiskScorer:
             if result.status == ClaimStatus.SKIPPED:
                 continue
 
+            # Source unreachable — abstained from scoring, warn only
+            if result.status == ClaimStatus.UNVERIFIABLE_SOURCE:
+                warnings.append(Warning(
+                    type="unverifiable_source",
+                    message=f'Source unreachable, could not verify: "{result.claim.text[:100]}"',
+                    claim_id=result.claim.id,
+                    source_url=(result.evidence[0].source_url if result.evidence else None),
+                ))
+
             # No evidence found
-            if not result.evidence and result.status == ClaimStatus.UNVERIFIED:
+            elif not result.evidence and result.status == ClaimStatus.UNVERIFIED:
                 warnings.append(Warning(
                     type="no_source",
                     message=f'No verifiable source found for: "{result.claim.text[:100]}"',

@@ -14,8 +14,10 @@ from app.config import get_settings
 from app.db.engine import get_db_session
 from app.db.models import AnalysisResult, ClaimAnalysis, EvidenceItem, Message
 from app.models.analytics import (
+    AnalyticsApiKeyStat,
     AnalyticsModelStat,
     AnalyticsOverviewResponse,
+    AnalyticsProviderStat,
     AnalyticsSummary,
     AnalyticsTimelinePoint,
 )
@@ -78,9 +80,12 @@ async def get_analytics_overview(
     )
     claim_summary = (await db.execute(claim_summary_stmt)).one()
 
+    # 模型归属：优先取消息上的 model_id，没有消息的独立检测行取自身的 model_id
+    model_id_expr = func.coalesce(Message.model_id, AnalysisResult.model_id)
+
     model_core_stmt = (
         select(
-            Message.model_id.label("model_id"),
+            model_id_expr.label("model_id"),
             func.count(func.distinct(AnalysisResult.id)).label("analyses"),
             func.count(ClaimAnalysis.id).label("claims"),
             func.coalesce(
@@ -94,29 +99,31 @@ async def get_analytics_overview(
             ).label("hallucinations"),
             func.coalesce(func.avg(confidence_expr), 0.0).label("avg_confidence"),
         )
-        .join(AnalysisResult, Message.analysis_result_id == AnalysisResult.id)
+        .select_from(AnalysisResult)
+        .outerjoin(Message, Message.analysis_result_id == AnalysisResult.id)
         .outerjoin(ClaimAnalysis, ClaimAnalysis.analysis_id == AnalysisResult.id)
         .where(
             AnalysisResult.created_at >= start_at,
-            Message.model_id.isnot(None),
+            model_id_expr.isnot(None),
         )
-        .group_by(Message.model_id)
+        .group_by(model_id_expr)
     )
     model_core_rows = (await db.execute(model_core_stmt)).all()
 
     model_sources_stmt = (
         select(
-            Message.model_id.label("model_id"),
+            model_id_expr.label("model_id"),
             func.count(EvidenceItem.id).label("sources"),
         )
-        .join(AnalysisResult, Message.analysis_result_id == AnalysisResult.id)
+        .select_from(AnalysisResult)
+        .outerjoin(Message, Message.analysis_result_id == AnalysisResult.id)
         .join(ClaimAnalysis, ClaimAnalysis.analysis_id == AnalysisResult.id)
         .join(EvidenceItem, EvidenceItem.claim_analysis_id == ClaimAnalysis.id)
         .where(
             AnalysisResult.created_at >= start_at,
-            Message.model_id.isnot(None),
+            model_id_expr.isnot(None),
         )
-        .group_by(Message.model_id)
+        .group_by(model_id_expr)
     )
     model_source_rows = (await db.execute(model_sources_stmt)).all()
     source_map = {
@@ -187,6 +194,65 @@ async def get_analytics_overview(
             )
         )
 
+    # 每个接入 Key 的调用次数（累计，来自 api_keys 表的 usage_count）
+    # 容错：表不存在或查询失败时返回空列表，不影响主统计
+    api_keys: list[AnalyticsApiKeyStat] = []
+    try:
+        from app.db.models import ApiKey
+
+        api_key_rows = (
+            (await db.execute(select(ApiKey).order_by(ApiKey.usage_count.desc())))
+            .scalars()
+            .all()
+        )
+        api_keys = [
+            AnalyticsApiKeyStat(
+                id=str(k.id),
+                name=k.name or "",
+                prefix=k.prefix or "",
+                is_active=bool(k.is_active),
+                usage_count=int(k.usage_count or 0),
+                last_used_at=k.last_used_at.isoformat() if k.last_used_at else None,
+            )
+            for k in api_key_rows
+        ]
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        api_keys = []
+
+    # 各上游服务 Key 的调用次数（累计，来自 provider_usage 表）
+    # 容错：表不存在或查询失败时返回空列表，不影响主统计
+    providers: list[AnalyticsProviderStat] = []
+    try:
+        from app.config import get_settings
+        from app.db.models import ProviderUsage
+
+        settings = get_settings()
+        provider_rows = (
+            (await db.execute(select(ProviderUsage).order_by(ProviderUsage.calls.desc())))
+            .scalars()
+            .all()
+        )
+        providers = [
+            AnalyticsProviderStat(
+                id=str(p.provider),
+                # zen 显示用户在设置里配的自定义模型名（如 mimo-v2.5）
+                label=settings.zen_model if str(p.provider) == "zen" and settings.zen_model else None,
+                calls=int(p.calls or 0),
+                last_used_at=p.last_used_at.isoformat() if p.last_used_at else None,
+            )
+            for p in provider_rows
+        ]
+    except Exception:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        providers = []
+
     return AnalyticsOverviewResponse(
         days=days,
         generated_at=now,
@@ -198,4 +264,6 @@ async def get_analytics_overview(
         ),
         models=models,
         timeline=timeline,
+        api_keys=api_keys,
+        providers=providers,
     )

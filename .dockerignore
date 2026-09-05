@@ -1,0 +1,34 @@
+# ── 构建上下文瘦身（docker build 时排除，context=仓库根目录）──
+# Git / 环境
+.git/
+.github/
+**/.gitkeep
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+backend/venv/
+backend/.venv/
+backend/.env
+backend/.env.bak*
+backend/*.log
+backend/.pytest_cache/
+backend/**/.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# 前端/静态产物副本（镜像内由 node 阶段重新构建，再用 COPY --from 拷入）
+frontend_dist/
+backend/frontend_dist/
+
+# 测试与临时文件
+temp/
+extension/
+api_*.py
+api_*.log
+verify_fixes.py
+全面测试报告*.md
+*.log

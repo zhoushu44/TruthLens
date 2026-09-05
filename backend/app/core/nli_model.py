@@ -1,155 +1,135 @@
 """
-NLI (Natural Language Inference) model wrapper for claim verification.
+NLI (Natural Language Inference) judge for claim verification.
 
-Uses DeBERTa-v3-base cross-encoder to classify (claim, evidence) pairs
-as entailment, contradiction, or neutral.
+Batches (evidence, claim) pairs to a fast Groq LLM acting as NLI judge.
+No local model, no torch dependency.
+
+Each pair is scored as {"entailment": x, "contradiction": y, "neutral": z}.
 """
 
 import asyncio
+import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import re
 from typing import Optional
-
-import numpy as np
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Thread pool for non-blocking GPU inference
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="nli-inference")
+# Fallback when a batch fails for a pair (keeps pipeline running)
+_NEUTRAL = {"entailment": 0.0, "contradiction": 0.0, "neutral": 1.0}
+
+NLI_JUDGE_PROMPT = """You are a Natural Language Inference judge. For each numbered item, compare the EVIDENCE (premise) against the CLAIM (hypothesis) and assign probabilities that sum to 1.0.
+
+- entailment: the evidence SUPPORTS / implies the claim
+- contradiction: the evidence CONTRADICTS the claim
+- neutral: the evidence is inconclusive about the claim (does not mention it, or lacks key details)
+
+Judge semantics, not wording. Evidence and claim may be in Chinese or English — judge meaning either way.
+
+Return ONLY valid JSON with this exact structure:
+{{"results": [{{"entailment": 0.9, "contradiction": 0.05, "neutral": 0.05}}, ...]}}
+
+Items:
+{items}
+"""
 
 
 class NLIModel:
     """
-    DeBERTa-v3-base NLI cross-encoder for claim verification.
-    
-    Classifies (premise, hypothesis) pairs into:
-    - ENTAILMENT: premise supports hypothesis
-    - CONTRADICTION: premise contradicts hypothesis  
-    - NEUTRAL: premise is inconclusive about hypothesis
+    Groq-based NLI judge for claim verification.
+
+    Classifies (evidence, claim) pairs into:
+    - ENTAILMENT: evidence supports claim
+    - CONTRADICTION: evidence contradicts claim
+    - NEUTRAL: evidence is inconclusive about claim
     """
 
-    # Label mapping for cross-encoder/nli-deberta-v3-base
-    LABELS = ["contradiction", "entailment", "neutral"]
+    # Pairs per LLM call (keeps JSON output reliable)
+    NLI_GROQ_BATCH_SIZE = 12
 
     def __init__(self):
         settings = get_settings()
-        self.model_name = settings.nli_model_name
-        self.device = settings.nli_device
-
-        # Check CUDA availability
-        if self.device == "cuda" and not torch.cuda.is_available():
-            logger.warning("CUDA not available, falling back to CPU")
-            self.device = "cpu"
-
-        self.tokenizer = None
-        self.model = None
+        self.groq_model = (settings.nli_groq_model or "").strip() or "openai/gpt-oss-20b"
+        self._groq_api_key = settings.groq_api_key
+        self._client = None
         self._loaded = False
+        # 轻量去重缓存：同一 evidence×claim 在多 claim 间常重复，直接命中免推理
+        self._cache: dict[tuple[str, str], dict[str, float]] = {}
+
+    def describe(self) -> dict:
+        """Backend info for /health and startup logs."""
+        return {"backend": "groq", "model": self.groq_model, "device": "api"}
 
     def load(self):
-        """Load the NLI model and tokenizer. Call during app startup."""
+        """Initialize the Groq client. Call during app startup."""
         if self._loaded:
             return
-
-        logger.info(f"Loading NLI model: {self.model_name} on {self.device}")
-
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name)
-        self.model.to(self.device)
-        self.model.eval()
-
-        # Warm up with a dummy inference
-        self._inference_sync([("test premise", "test hypothesis")])
-
-        logger.info(f"NLI model loaded successfully on {self.device}")
+        if not self._groq_api_key:
+            raise RuntimeError("GROQ_API_KEY not set — NLI judge unavailable")
+        from openai import AsyncOpenAI
+        self._client = AsyncOpenAI(
+            base_url="https://api.groq.com/openai/v1",
+            api_key=self._groq_api_key,
+        )
         self._loaded = True
-
-    def _inference_sync(
-        self, pairs: list[tuple[str, str]]
-    ) -> list[dict[str, float]]:
-        """
-        Run NLI inference synchronously (blocking).
-        
-        Args:
-            pairs: List of (premise/evidence, hypothesis/claim) tuples.
-            
-        Returns:
-            List of score dicts: [{"entailment": 0.9, "contradiction": 0.05, "neutral": 0.05}, ...]
-        """
-        if not self.model or not self.tokenizer:
-            raise RuntimeError("NLI model not loaded. Call load() first.")
-
-        if not pairs:
-            return []
-
-        # Tokenize all pairs
-        premises = [p[0] for p in pairs]
-        hypotheses = [p[1] for p in pairs]
-
-        inputs = self.tokenizer(
-            premises,
-            hypotheses,
-            padding=True,
-            truncation=True,
-            max_length=512,
-            return_tensors="pt",
-        ).to(self.device)
-
-        # Run inference
-        with torch.no_grad():
-            outputs = self.model(**inputs)
-            logits = outputs.logits
-            probabilities = torch.softmax(logits, dim=-1).cpu().numpy()
-
-        # Convert to labeled dicts
-        results = []
-        for probs in probabilities:
-            result = {
-                label: float(prob)
-                for label, prob in zip(self.LABELS, probs)
-            }
-            results.append(result)
-
-        return results
+        logger.info(f"NLI backend: Groq judge ({self.groq_model}), no local model loaded")
 
     async def predict(
         self, pairs: list[tuple[str, str]]
     ) -> list[dict[str, float]]:
         """
-        Async NLI inference — runs on thread pool to avoid blocking FastAPI.
-        
-        GPU operations release the GIL during CUDA compute, so other
-        async tasks can proceed while inference runs.
-        
-        Args:
-            pairs: List of (evidence_text, claim_text) tuples.
-            
+        Score (evidence_text, claim_text) pairs.
+
         Returns:
             List of score dicts with keys: entailment, contradiction, neutral.
         """
         if not pairs:
             return []
 
-        loop = asyncio.get_event_loop()
-        results = await loop.run_in_executor(
-            _executor, self._inference_sync, pairs
-        )
-        return results
+        # 缓存命中先摘除，只推理未见过的 pair（保持返回顺序）
+        results: list[Optional[dict[str, float]]] = [None] * len(pairs)
+        todo: list[tuple[str, str]] = []
+        todo_idx: list[int] = []
+        for i, p in enumerate(pairs):
+            key = (p[0][:500], p[1][:500])
+            hit = self._cache.get(key)
+            if hit is not None:
+                results[i] = hit
+            else:
+                todo.append(p)
+                todo_idx.append(i)
+
+        if todo:
+            computed: list[dict[str, float]] = []
+            for start in range(0, len(todo), self.NLI_GROQ_BATCH_SIZE):
+                chunk = todo[start:start + self.NLI_GROQ_BATCH_SIZE]
+                try:
+                    scores = await self._judge_batch(chunk)
+                except Exception as e:
+                    logger.warning(f"Groq NLI batch failed ({len(chunk)} pairs): {e}")
+                    scores = [dict(_NEUTRAL) for _ in chunk]
+                computed.extend(scores)
+            for i, res in zip(todo_idx, computed):
+                results[i] = res
+                key = (pairs[i][0][:500], pairs[i][1][:500])
+                if len(self._cache) < 2000:
+                    self._cache[key] = res
+
+        return [r if r is not None else dict(_NEUTRAL) for r in results]
 
     async def predict_single(
         self, evidence: str, claim: str
     ) -> dict[str, float]:
         """
         Predict NLI scores for a single (evidence, claim) pair.
-        
+
         Returns:
             Score dict: {"entailment": 0.9, "contradiction": 0.05, "neutral": 0.05}
         """
         results = await self.predict([(evidence, claim)])
-        return results[0] if results else {"entailment": 0.0, "contradiction": 0.0, "neutral": 0.0}
+        return results[0] if results else dict(_NEUTRAL)
 
     def get_label(self, scores: dict[str, float]) -> str:
         """Get the predicted NLI label from scores."""
@@ -158,6 +138,80 @@ class NLIModel:
     @property
     def is_loaded(self) -> bool:
         return self._loaded
+
+    async def _judge_batch(
+        self, pairs: list[tuple[str, str]]
+    ) -> list[dict[str, float]]:
+        """One Groq call for up to NLI_GROQ_BATCH_SIZE pairs."""
+        if self._client is None:
+            raise RuntimeError("Groq NLI client not initialized (call load() first)")
+
+        lines = []
+        for i, (evidence, claim) in enumerate(pairs):
+            lines.append(
+                f'[{i}] EVIDENCE: "{evidence[:600]}"\n'
+                f'[{i}] CLAIM: "{claim[:300]}"'
+            )
+        prompt = NLI_JUDGE_PROMPT.format(items="\n".join(lines))
+
+        last_error: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                resp = await asyncio.wait_for(
+                    self._client.chat.completions.create(
+                        model=self.groq_model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.0,
+                        max_tokens=2048,
+                        response_format={"type": "json_object"},
+                    ),
+                    timeout=30.0,
+                )
+                return self._parse_judge_response(
+                    resp.choices[0].message.content, len(pairs)
+                )
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Groq NLI attempt {attempt + 1}/2 failed: {e}")
+        raise last_error or RuntimeError("Groq NLI judge failed")
+
+    def _parse_judge_response(
+        self, response_text: str, expected: int
+    ) -> list[dict[str, float]]:
+        """Parse the judge's JSON into normalized score dicts."""
+        text = (response_text or "").strip()
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            text = match.group(0)
+        text = re.sub(r",\s*([}\]])", r"\1", text)
+        data = json.loads(text)
+
+        items = data.get("results", data) if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            raise ValueError("Groq NLI response has no results list")
+
+        parsed: list[dict[str, float]] = []
+        for item in items[:expected]:
+            try:
+                ent = float(item.get("entailment", 0.0))
+                con = float(item.get("contradiction", 0.0))
+                neu = float(item.get("neutral", 0.0))
+            except (TypeError, ValueError, AttributeError):
+                ent, con, neu = 0.0, 0.0, 1.0
+            total = ent + con + neu
+            if total <= 0:
+                ent, con, neu = 0.0, 0.0, 1.0
+                total = 1.0
+            parsed.append({
+                "entailment": round(ent / total, 4),
+                "contradiction": round(con / total, 4),
+                "neutral": round(neu / total, 4),
+            })
+
+        # 数量对不上（模型漏项）时用 neutral 补齐，保证顺序和数量严格对应
+        while len(parsed) < expected:
+            parsed.append(dict(_NEUTRAL))
+        return parsed
 
 
 # ── Module-level singleton ────────────────────────────────────────────────

@@ -1,0 +1,18 @@
+[PASS] detect#1 中文+联网  risk=5.0 level=LOW claims=4 verdicts={'VERIFIED': 4} 9019ms (9s)
+[PASS] detect#1 中文+联网 [首条]  text='埃菲尔铁塔高330米' status=VERIFIED risk=5.0 reasoning='Fallback heuristic: max_entailment=0.950, max_contradiction=' citations=4
+[PASS] detect#2 扩展(extension)模式  risk=5.0 level=LOW claims=1 verdicts={'VERIFIED': 1} 34169ms (34s)
+[PASS] detect#2 扩展(extension)模式 [首条]  text='地球到太阳的平均距离约为1.5亿公里，即1个天文单位。' status=VERIFIED risk=5.0 reasoning='Fallback heuristic: max_entailment=0.990, max_contradiction=' citations=5
+[FAIL] detect 非法 role 应 422  HTTP 200 {"response_id":"61ad1676-7e8f-44a4-b18b-5fa14082ebdf","overall_risk_score":0.0,"risk_level":"LOW","risk_color":"#22C55E","warning_message":"Response a
+[PASS] detect 空body(两种模式都没给) 应 400 提示  HTTP 400
+[PASS] 未知 /api/v1 路由 应 404  HTTP 404
+[FAIL] sync#1: messages_synced=2 应 total=2  返回 messages_synced=2 total_messages=0 ← 若total=0即缺陷
+[PASS] sync#1 后 GET 实际条数  GET=2 (与total_messages字段对比)
+[PASS] upload 带 conversation_id 应 200  HTTP 200 {'id': 'e60c2d91-8698-4be3-86b7-a952d5b44714', 'filename': 'doc-with-conv.txt', 'file_type': 'text/plain', 'file_size_by
+[FAIL] upload 不带 conversation(全局KB) 应 200(当前代码意图)  HTTP 500 Internal Server Error  ← 实际500=缺陷(DB列 NOT NULL 未迁移)
+[PASS] PUT /settings values={} 应 ok  HTTP 200 {"ok":true,"updated":[],"effective":{"claim_ready":true,"claim_channel":"groq > nvidia > openrouter","claim_model":"通道默认
+
+============================================================
+PART2 TOTAL=12 PASS=9 FAIL=3
+FAIL: detect 非法 role 应 422 | HTTP 200 {"response_id":"61ad1676-7e8f-44a4-b18b-5fa14082ebdf","overall_risk_score":0.0,"risk_level":"LOW","risk_color":"#22C55E","warning_message":"Response a
+FAIL: sync#1: messages_synced=2 应 total=2 | 返回 messages_synced=2 total_messages=0 ← 若total=0即缺陷
+FAIL: upload 不带 conversation(全局KB) 应 200(当前代码意图) | HTTP 500 Internal Server Error  ← 实际500=缺陷(DB列 NOT NULL 未迁移)

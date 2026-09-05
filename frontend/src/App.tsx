@@ -2,8 +2,11 @@ import { useState } from "react";
 import { ChatSidebarContainer } from "@/components/sidebar/sidebar-container";
 import { ChatContainer } from "@/components/chat/chat-container";
 import { AnalyticsPage } from "@/components/analytics/analytics-page";
+import { ApiKeysPage } from "@/components/apikeys/apikeys-page";
+import { ApiDocsPage } from "@/components/apidocs/apidocs-page";
 import { SidebarProvider, SidebarInset } from "@/components/animate-ui/components/radix/sidebar";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ProviderSettingsModal } from "@/components/settings/settings-modal";
 
 function App() {
   const [activeChatId, setActiveChatId] = useState<string>("");
@@ -47,15 +50,17 @@ function App() {
         onChatSelect={setActiveChatId}
       />
       <SidebarInset className="relative flex-1 flex flex-col z-10 bg-transparent shadow-none border-none ring-0">
-        {activeChatId === "analytics" ? (
+        {activeChatId === "apikeys" ? <ApiKeysPage /> : activeChatId === "apidocs" ? <ApiDocsPage /> : activeChatId === "analytics" ? (
           <AnalyticsPage />
         ) : (
           <ChatContainer key={activeChatId} activeChatId={activeChatId} />
         )}
       </SidebarInset>
+          <ProviderSettingsModal />
     </SidebarProvider>
     </ThemeProvider>
   );
 }
 
 export default App;
+

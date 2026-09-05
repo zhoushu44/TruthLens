@@ -2,9 +2,10 @@ import { ChatInput } from "./chat-input";
 import { ChatMessageList } from "./chat-message-list";
 import type { ChatPaneData, ModelId } from "./chat-container";
 import type { BackendModel } from "@/lib/api";
-import { Plus, X, ChevronRight } from "lucide-react";
+import { Plus, X, ChevronRight, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ModeToggle } from "@/components/mode-toggle";
+import { openProviderSettings } from "@/lib/api";
 
 import {
   Select,
@@ -55,7 +56,12 @@ export function ChatLayout({
           <span className="text-pri truncate max-w-[200px] sm:max-w-md">{chatTitle}</span>
         </div>
         
-        <ModeToggle className="mr-2" />
+        <div className="flex items-center gap-1 mr-2">
+          <Button variant="ghost" size="icon" onClick={openProviderSettings} title="模型与搜索 Key 设置" className="h-8 w-8 rounded-lg text-mut hover:text-pri">
+            <KeyRound className="h-4 w-4" />
+          </Button>
+          <ModeToggle />
+        </div>
       </div>
 
       {/* Dynamic Pane Flexbox Layout */}
@@ -218,3 +224,6 @@ export function ChatLayout({
     </div>
   );
 }
+
+
+

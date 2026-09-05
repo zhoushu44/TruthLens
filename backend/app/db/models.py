@@ -30,6 +30,16 @@ from pgvector.sqlalchemy import Vector
 
 from app.models.detect import ClaimDomain, SourceType
 
+
+def _utcnow() -> datetime:
+    """时区感知的 UTC 现在时间。
+
+    重要：绝不能用 datetime.utcnow()（naive）。asyncpg 会把 naive 时间按
+    本机时区（北京 +8）理解再转 UTC 存入，导致所有时间戳整体偏小 8 小时、
+    仪表盘按天统计错位。所有 created_at/updated_at 默认值必须用本函数。
+    """
+    return datetime.now(timezone.utc)
+
 Base = declarative_base()
 
 def generate_uuid():
@@ -47,8 +57,8 @@ class Conversation(Base):
     title = Column(String(500), nullable=True)                        # Conversation title
     external_url = Column(String(2048), nullable=True)                # Original URL (e.g., https://chatgpt.com/c/...)
     
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
     
     # Metadata (models used, tokens, etc.)
     metadata_json = Column(JSONB, default=dict)
@@ -73,7 +83,7 @@ class Message(Base):
     conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     role = Column(String(50), nullable=False)  # 'user', 'assistant', 'system'
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
     
     # External platform tracking
     external_id = Column(String(255), nullable=True)       # "user-8", "assistant-8" (from extension)
@@ -104,7 +114,7 @@ class Document(Base):
     conversation_id = Column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
     filename = Column(String(255), nullable=False)
     content_type = Column(String(100), nullable=False)
-    uploaded_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    uploaded_at = Column(DateTime(timezone=True), default=_utcnow)
     
     conversation = relationship("Conversation", back_populates="documents")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
@@ -137,7 +147,7 @@ class ExtractedEntity(Base):
     # What message it was extracted from
     source_message_id = Column(String(36), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
     message_index = Column(Integer, nullable=True)  # Position in conversation (fixes hardcoded 0 bug)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
 
     conversation = relationship("Conversation", back_populates="entities")
 
@@ -150,7 +160,8 @@ class AnalysisResult(Base):
     ai_response_text = Column(Text, nullable=False)
     overall_risk_score = Column(Float, nullable=False)
     risk_level = Column(String(50), nullable=False)  # LOW, MODERATE, HIGH, CRITICAL
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    model_id = Column(String(100), nullable=True)  # 哪个模型/通道产生的这次检测（独立行统计用）
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
     
     # Store warnings as a JSON array of strings
     warnings = Column(JSONB, default=list)
@@ -195,3 +206,31 @@ class EvidenceItem(Base):
     nli_verdict = Column(String(50), nullable=False)
 
     claim_analysis = relationship("ClaimAnalysis", back_populates="evidence")
+
+
+
+# ── API Keys（开放调用：自己用 + 外部系统调用）─────────────────────────
+# 自己用：WebUI 创建 Key，外部用 Authorization: Bearer tl-xxx 调用
+# 不限流：只计数，不限次。key_hash 存 sha256，明文只显示一次。
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    name = Column(String(200), nullable=False, default="default")
+    prefix = Column(String(20), nullable=False, index=True)  # tl-abc123 前缀展示用
+    key_hash = Column(String(128), nullable=False, unique=True, index=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    usage_count = Column(Integer, nullable=False, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_utcnow)
+
+
+# ── 上游 Provider 调用计数（Groq / Tavily 等服务 Key 的实际调用量）─────
+# 每次真实出站调用成功后 +1，用于仪表盘「上游服务调用统计」。
+class ProviderUsage(Base):
+    __tablename__ = "provider_usage"
+
+    provider = Column(String(50), primary_key=True)  # groq / tavily / ...
+    calls = Column(Integer, nullable=False, default=0)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)

@@ -27,7 +27,7 @@ export function ChatSidebarContainer({ activeChatId, onChatSelect }: ChatSidebar
       setChats(formatted);
       if (
         formatted.length > 0 &&
-        (!activeChatId || (activeChatId !== "analytics" && !formatted.some((c) => c.id === activeChatId)))
+        (!activeChatId || (!["analytics","apikeys","apidocs"].includes(activeChatId) && !formatted.some((c) => c.id === activeChatId)))
       ) {
         onChatSelect(formatted[0].id);
       }

@@ -69,26 +69,43 @@ class Settings(BaseSettings):
         description="Google Gemini API key from AI Studio (for claim adjudication)",
     )
 
+    # ── OpenAI-compatible adjudicator (自定义仲裁模型槽位：Zen / Groq直连 / Ollama / vLLM 等) ─────────
+    zen_api_key: Optional[str] = Field(
+        default=None,
+        description="API key for the OpenAI-compatible adjudicator (key of whichever base_url you point to)",
+    )
+    zen_base_url: str = Field(
+        default="https://opencode.ai/zen/go/v1",
+        description="Base URL for OpenAI-compatible adjudication gateway",
+    )
+    zen_model: str = Field(
+        default="mimo-v2.5",
+        description="Model id for OpenAI-compatible claim adjudication",
+    )
+    adjudication_mode: str = Field(
+        default="joint",
+        description="Claim adjudication mode: 'joint' (multiple claims in one call) or 'perclaim' (one LLM call per claim)",
+    )
+
     # ── Google Fact Check Tools API ───────────────────────────────────────
     google_factcheck_api_key: Optional[str] = Field(
         default=None,
         description="Google Fact Check Tools API key from GCP Console",
     )
 
-    # ── NLI Model ─────────────────────────────────────────────────────────
-    nli_model_name: str = Field(
-        default="cross-encoder/nli-deberta-v3-base",
-        description="HuggingFace NLI cross-encoder model",
+    # ── NLI Judge (Groq API) ──────────────────────────────────────────────
+    nli_groq_model: str = Field(
+        default="openai/gpt-oss-20b",
+        description="Fast Groq model used as NLI judge (batch entailment scoring)",
     )
-    nli_device: str = Field(
-        default="cuda",
-        description="Device for NLI inference: 'cuda' or 'cpu'",
-    )
+    # 兼容字段：旧版本地 NLI 用过的 NLI_DEVICE 环境变量可能仍被外部注入，
+    # 保留此字段可避免 Settings extra=forbid 导致启动失败；现 NLI 走 Groq API，不再读取它。
+    nli_device: str = Field(default="auto")
 
     # ── Claim Extraction ──────────────────────────────────────────────────
     claim_extraction_model: str = Field(
-        default="llama-3.3-70b-versatile",
-        description="Primary model for claim extraction",
+        default="",
+        description="Override model for claim extraction (empty = per-provider default)",
     )
 
     # ── Pipeline Config ───────────────────────────────────────────────────
@@ -117,8 +134,10 @@ class Settings(BaseSettings):
 
     # ── Server ────────────────────────────────────────────────────────────
     host: str = Field(default="0.0.0.0")
-    port: int = Field(default=8000)
+    port: int = Field(default=6655)
     debug: bool = Field(default=True)
+    truthlens_api_key: Optional[str] = Field(default=None)
+    api_key_required: bool = Field(default=False)
 
     # ── Supported LLM Models ──────────────────────────────────
     @property
@@ -131,22 +150,31 @@ class Settings(BaseSettings):
         - Gemini (Google AI Studio)
         - OpenRouter
         """
-        return {
+        models = {
 
-            # ── Groq ───────────────────────
-            "llama-3.3-70b-versatile": {
-                "name": "Llama 3.3 70B (Groq)",
+            # ── Groq (ids verified live, 2026-09) ───────
+            "openai/gpt-oss-120b": {
+                "name": "gpt-oss 120B (Groq)",
                 "provider": "groq",
                 "tier": 1,
                 "api_key_field": "groq_api_key",
-                "description": "Meta's best open model, blazing fast on Groq",
+                "description": "OpenAI open-weight flagship, strong reasoning on Groq",
             },
-            "llama-3.1-8b-instant": {
-                "name": "Llama 3.1 8B (Groq)",
+            "openai/gpt-oss-20b": {
+                "name": "gpt-oss 20B (Groq)",
                 "provider": "groq",
                 "tier": 2,
                 "api_key_field": "groq_api_key",
-                "description": "Meta's insanely fast small model on Groq",
+                "description": "Small fast open model on Groq",
+            },
+
+            # ── Zen gateway (OpenAI-compatible) ──
+            "mimo-v2.5": {
+                "name": "MiMo V2.5 (Zen)",
+                "provider": "zen",
+                "tier": 1,
+                "api_key_field": "zen_api_key",
+                "description": "Xiaomi reasoning model via OpenCode Zen",
             },
 
             # ── NVIDIA NIM ──────────────────
@@ -205,6 +233,17 @@ class Settings(BaseSettings):
             },
 
         }
+
+        # ZEN_MODEL 自定义名：id 保持 "mimo-v2.5"(历史会话不 break)，
+        # 下拉显示名 + 实际发给网关的模型名都用自定义值
+        custom_zen = (self.zen_model or "").strip()
+        if custom_zen and custom_zen != "mimo-v2.5":
+            models["mimo-v2.5"] = {
+                **models["mimo-v2.5"],
+                "name": f"{custom_zen} (Zen)",
+            }
+
+        return models
 
     model_config = {
         "env_file": ".env",

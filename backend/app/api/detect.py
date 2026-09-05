@@ -13,8 +13,12 @@ import time
 import uuid
 import logging
 
+from typing import Optional
+
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.apikey_auth import require_api_key_if_configured
 
 from app.models.detect import (
     DetectionRequest,
@@ -48,6 +52,10 @@ def _map_claim_status_from_verdict(verdict: str | None) -> ClaimStatus:
         return ClaimStatus.VERIFIED
     if normalized in {"CONTRADICTED", "CONTRADICTION"}:
         return ClaimStatus.CONTRADICTED
+    if normalized in {"PARTIALLY_VERIFIED", "PARTIALLY_SUPPORTED", "PARTIAL"}:
+        return ClaimStatus.PARTIALLY_VERIFIED
+    if normalized in {"OPINION", "SUBJECTIVE"}:
+        return ClaimStatus.OPINION
     if normalized == "UNVERIFIABLE_SOURCE":
         return ClaimStatus.UNVERIFIABLE_SOURCE
     if normalized == "SKIPPED":
@@ -377,37 +385,39 @@ async def _persist_single_mode_analysis(
     pipeline_result: dict,
     db: AsyncSession,
 ) -> None:
-    """Persist single-mode detection results when a target assistant message is available."""
-    if not request.conversation_id:
-        return
+    """Persist single-mode detection results.
 
+    有 conversation_id 时尽量关联到站内 assistant 消息；没有（外部 Key 直调、
+    文档页试调用）也落一条独立 AnalysisResult，保证仪表盘各时间范围统计不漏数。
+    """
     from sqlalchemy import select
     from app.db.models import AnalysisResult, ClaimAnalysis, EvidenceItem, Message
 
-    message_query = select(Message).where(
-        Message.conversation_id == request.conversation_id,
-        Message.role == "assistant",
-    )
-
-    if request.assistant_message_id:
-        message_query = message_query.where(Message.id == request.assistant_message_id)
-    else:
-        message_query = message_query.where(Message.analysis_result_id.is_(None))
-        if request.model_response:
-            message_query = message_query.where(Message.content == request.model_response)
-
-    message_query = message_query.order_by(Message.created_at.desc()).limit(1)
-    db_msg = (await db.execute(message_query)).scalar_one_or_none()
-
-    if not db_msg:
-        logger.info(
-            "Single-mode persistence skipped: no target assistant message found for conversation %s",
-            request.conversation_id,
+    db_msg = None
+    if request.conversation_id:
+        message_query = select(Message).where(
+            Message.conversation_id == request.conversation_id,
+            Message.role == "assistant",
         )
-        return
 
-    if db_msg.analysis_result_id is not None:
-        return
+        if request.assistant_message_id:
+            message_query = message_query.where(Message.id == request.assistant_message_id)
+        else:
+            message_query = message_query.where(Message.analysis_result_id.is_(None))
+            if request.model_response:
+                message_query = message_query.where(Message.content == request.model_response)
+
+        message_query = message_query.order_by(Message.created_at.desc()).limit(1)
+        db_msg = (await db.execute(message_query)).scalar_one_or_none()
+
+        if db_msg is not None and db_msg.analysis_result_id is not None:
+            return  # 该消息已分析过，不重复落库
+        if db_msg is None:
+            logger.info(
+                "Single-mode persistence: no target assistant message found for conversation %s, "
+                "saving standalone analysis row",
+                request.conversation_id,
+            )
 
     warnings_payload = [
         warning.model_dump() if hasattr(warning, "model_dump") else warning
@@ -422,10 +432,12 @@ async def _persist_single_mode_analysis(
             if hasattr(pipeline_result["risk_level"], "value")
             else pipeline_result["risk_level"]
         ),
+        model_id=request.model_id,
         warnings=warnings_payload,
     )
     db.add(ar)
-    db_msg.analysis_result = ar
+    if db_msg is not None:
+        db_msg.analysis_result = ar
 
     for claim_res in pipeline_result["verification_results"]:
         ca = ClaimAnalysis(
@@ -619,14 +631,17 @@ async def _detect_extension(request: DetectionRequest, db: AsyncSession) -> Dete
         logger.info(f"No new assistant messages for {conv.id}. Fetching historical data.")
 
     # ── Step 3: Run detection for each assistant message ─────────────
+    # 多条 assistant 消息时管线并行跑（原来 for 循环串行，3 条≈3 倍耗时）；
+    # DB 写入仍串行（AsyncSession 不能并发用），先 gather 纯计算再逐条落库。
     all_claims_response = []
     all_warnings = []
     message_results = []
     seen_message_result_keys: set[str] = set()
 
-    for assistant_msg in assistant_messages:
-        # Build conversation history up to this message
-        msg_index = assistant_msg.index if assistant_msg.index is not None else 0
+    _detect_sema = asyncio.Semaphore(3)
+
+    async def _run_one(msg):
+        msg_index = msg.index if msg.index is not None else 0
         history_messages = [
             ConversationMessage(
                 role=m.role,
@@ -636,10 +651,9 @@ async def _detect_extension(request: DetectionRequest, db: AsyncSession) -> Dete
             for m in ext_messages
             if m.index is not None and m.index < msg_index
         ]
-
-        try:
-            pipeline_result = await _run_detection_pipeline(
-                model_response=assistant_msg.text,
+        async with _detect_sema:
+            return await _run_detection_pipeline(
+                model_response=msg.text,
                 conversation_history=history_messages,
                 conversation_id=conv.id,
                 document_ids=request.document_ids,
@@ -648,8 +662,39 @@ async def _detect_extension(request: DetectionRequest, db: AsyncSession) -> Dete
                     "check_documents": request.config.check_documents,
                     "check_conversation": request.config.check_conversation,
                 },
-                platform_sources=assistant_msg.sources,
+                platform_sources=msg.sources,
             )
+
+    pipeline_outcomes: list = await asyncio.gather(
+        *[_run_one(m) for m in assistant_messages], return_exceptions=True
+    )
+
+    for assistant_msg, pipeline_result in zip(assistant_messages, pipeline_outcomes):
+        if isinstance(pipeline_result, Exception):
+            e = pipeline_result
+            logger.error(f"Detection failed for message {assistant_msg.id}: {e}", exc_info=True)
+            # Still add an empty result so highlighting doesn't break
+            message_result = MessageDetectionResult(
+                messageId=assistant_msg.id,
+                messageIndex=assistant_msg.index,
+                assistantRoleIndex=assistant_msg.roleIndex,
+                role="assistant",
+                risk_score=0.0,
+                risk_level=RiskLevel.LOW,
+                claims=[],
+            )
+            message_result_key = _build_message_result_key(
+                message_result.messageId,
+                message_result.messageIndex,
+                message_result.assistantRoleIndex,
+            )
+            if message_result_key is None or message_result_key not in seen_message_result_keys:
+                if message_result_key is not None:
+                    seen_message_result_keys.add(message_result_key)
+                message_results.append(message_result)
+            continue
+
+        try:
 
             # Build per-message claims and highlights
             claims = _build_claims_response(pipeline_result["verification_results"])
@@ -796,10 +841,16 @@ async def _detect_extension(request: DetectionRequest, db: AsyncSession) -> Dete
                 max_contra = max(max_contra, ev.nli_contradiction_prob)
 
             note_parts = [f"Status: {status.value}"]
-            if status == ClaimStatus.UNVERIFIABLE_SOURCE:
+            if getattr(claim, "reasoning", None):
+                note_parts.append(claim.reasoning)
+            elif status == ClaimStatus.UNVERIFIABLE_SOURCE:
                 note_parts.append("Source link unreachable.")
             elif status == ClaimStatus.UNVERIFIED:
                 note_parts.append("Could not find strong evidence supporting or contradicting this claim.")
+            elif status == ClaimStatus.PARTIALLY_VERIFIED:
+                note_parts.append(f"Partially supported (entailment: {max_ent:.2f}).")
+            elif status == ClaimStatus.OPINION:
+                note_parts.append("Opinion/subjective claim.")
             elif max_contra > 0.3:
                 note_parts.append(f"Contradiction detected (score: {max_contra:.2f})")
             elif max_ent > 0.7:
@@ -904,6 +955,7 @@ async def _detect_extension(request: DetectionRequest, db: AsyncSession) -> Dete
 async def detect_hallucinations(
     request: DetectionRequest,
     db: AsyncSession = Depends(get_db_session),
+    _key_info: Optional[dict] = Depends(require_api_key_if_configured),
 ):
     """
     Detect hallucinations in AI-generated responses.

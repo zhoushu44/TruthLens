@@ -167,7 +167,7 @@ class ClaimVerifier:
 
             evidence_list, sources_checked = evidence_result
             for ev_idx, evidence in enumerate(evidence_list):
-                all_nli_pairs.append((evidence.snippet, claims[claim_idx].text))
+                all_nli_pairs.append((evidence.snippet, claims[claim_idx].verification_text))
                 pair_mapping.append((result_idx, claim_idx, ev_idx))
 
         # Batch NLI inference
@@ -408,7 +408,7 @@ class ClaimVerifier:
         evidence = []
 
         results = await semantic_search_documents(
-            query_text=claim.text,
+            query_text=claim.verification_text,
             document_ids=document_ids,
             top_k=3,
         )

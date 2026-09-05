@@ -406,6 +406,10 @@ async def sync_conversation(
         platform=request.platform,
     )
 
+    # 会话 autoflush=False：先显式 flush，让本次新增的行对本事务内查询可见，
+    # 否则下方 count 会漏掉刚插入的消息（total_messages 恒少算本次新增）
+    await db.flush()
+
     # Get total message count
     from sqlalchemy import func
     count_query = select(func.count(Message.id)).where(Message.conversation_id == conv.id)

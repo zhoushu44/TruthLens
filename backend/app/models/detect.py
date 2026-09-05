@@ -203,6 +203,7 @@ class ExtractedClaim(BaseModel):
     """A single claim extracted from the AI response by the LLM."""
     id: str = Field(..., description="Unique claim identifier (e.g., c1, c2)")
     text: str = Field(..., description="The claim as a standalone assertion")
+    text_en: Optional[str] = Field(None, description="English translation of the claim, used for verification/NLI when text is non-English")
     exact_quote: Optional[str] = Field(None, description="Exact substring from the AI response")
     citation_indices: list[int] = Field(default_factory=list, description="Extracted citation indices [1], [2]")
     domain: ClaimDomain = Field(ClaimDomain.GENERAL_FACTUAL, description="Domain classification for source routing")
@@ -227,6 +228,11 @@ class ExtractedClaim(BaseModel):
         False,
         description="Hint that this claim may need multi-hop reasoning over evidence",
     )
+
+    @property
+    def verification_text(self) -> str:
+        """Text used for retrieval/NLI: English translation when available."""
+        return self.text_en or self.text
 
 
 class EvidencePiece(BaseModel):

@@ -7,8 +7,12 @@ POST /api/v1/chat — Proxy to LLM APIs with streaming support.
 import uuid
 import logging
 
-from fastapi import APIRouter, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from app.core.apikey_auth import require_api_key_if_configured
 
 from app.models.chat import ChatRequest, ChatResponse
 from app.utils.llm_clients import get_llm_client
@@ -20,7 +24,10 @@ router = APIRouter()
 
 
 @router.post("/chat")
-async def chat_with_model(request: ChatRequest):
+async def chat_with_model(
+    request: ChatRequest,
+    _key_info: Optional[dict] = Depends(require_api_key_if_configured),
+):
     """
     Send a message to the specified LLM model.
     

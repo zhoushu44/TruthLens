@@ -204,17 +204,8 @@ class DomainSourceRouter:
             if method:
                 tasks.append(self._safe_call(method, primary_query, claim))
 
-        # 2. Tavily domain-filtered search
-        if self.settings.tavily_api_key:
-            tasks.append(self._safe_call(
-                self._search_tavily_filtered, primary_query, domain
-            ))
-
-        # 3. Serper domain-filtered search
-        if self.settings.serper_api_key:
-            tasks.append(self._safe_call(
-                self._search_serper_filtered, primary_query, domain
-            ))
+        # 2+3. Web 搜索（Tavily 优先、Serper 兜底，见 _gather_web）
+        tasks.append(self._gather_web(primary_query, domain))
 
         results = await asyncio.gather(*tasks)
 
@@ -238,22 +229,77 @@ class DomainSourceRouter:
         return evidence
 
     async def _safe_call(self, fn, *args) -> list[EvidencePiece]:
-        """Call a source function safely, returning empty list on error."""
+        """Call a source function safely, returning empty list on error/timeout."""
         try:
-            result = await fn(*args)
+            # 单源超时保护：避免某个慢源拖住整条 claim（借鉴 Haystack/RAGFlow 的 per-retriever 超时做法）
+            result = await asyncio.wait_for(fn(*args), timeout=12.0)
             return result or []
+        except asyncio.TimeoutError:
+            logger.warning(f"Source {fn.__name__} timed out after 12s, skipped")
+            return []
         except Exception as e:
             logger.warning(f"Source {fn.__name__} failed: {e}")
             return []
+
+    async def _gather_web(
+        self, query: str, domain: ClaimDomain,
+    ) -> list[EvidencePiece]:
+        """Web 搜索：Tavily 优先（高级搜索+全文），<3 条才补一次 Serper。
+
+        两者串行但共用一个连接（省 TLS 握手），好路径只花一次付费调用。
+        """
+        if not self.settings.tavily_api_key and not self.settings.serper_api_key:
+            return []
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                out: list[EvidencePiece] = []
+                if self.settings.tavily_api_key:
+                    out.extend(await self._safe_call(
+                        self._search_tavily_filtered, query, domain, client
+                    ))
+                if len(out) < 3 and self.settings.serper_api_key:
+                    out.extend(await self._safe_call(
+                        self._search_serper_filtered, query, domain, client
+                    ))
+                return out
+        except Exception as e:
+            logger.warning(f"Web search block failed: {e}")
+            return []
+
+    # ── Wikipedia ─────────────────────────────────────────────────────────
+
+    _WIKI_HEADERS = {
+        "User-Agent": "TruthLens-HallucinationDetector/2.0 (contact: research@detector.local)",
+        "Accept": "application/json",
+    }
+
+    @staticmethod
+    def _parse_json_response(resp: "httpx.Response", source: str) -> Optional[dict]:
+        """403/HTML/空 body 时返回 None 而不是抛 JSONDecodeError（修复日志里的 Expecting value 报错）。"""
+        if resp.status_code != 200:
+            logger.warning(f"{source} returned HTTP {resp.status_code}, skipped")
+            return None
+        ctype = resp.headers.get("content-type", "")
+        if "json" not in ctype and "javascript" not in ctype and "text" not in ctype:
+            logger.warning(f"{source} unexpected content-type {ctype!r}, skipped")
+            return None
+        if not resp.content or not resp.content.strip():
+            logger.warning(f"{source} returned empty body, skipped")
+            return None
+        try:
+            return resp.json()
+        except Exception as e:
+            logger.warning(f"{source} JSON parse failed: {e}, skipped")
+            return None
 
     # ── Wikipedia ─────────────────────────────────────────────────────────
 
     async def _search_wikipedia(
         self, query: str, claim: ExtractedClaim = None,
     ) -> list[EvidencePiece]:
-        """Search Wikipedia and extract article introductions."""
+        """Search Wikipedia and extract article introductions (extract 并行取，3 篇串行→并行)。"""
         evidence = []
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, headers=self._WIKI_HEADERS) as client:
             # Step 1: Search for relevant articles
             search_resp = await client.get(
                 "https://en.wikipedia.org/w/api.php",
@@ -264,37 +310,47 @@ class DomainSourceRouter:
                     "format": "json",
                     "srlimit": 3,
                 },
-                headers={"User-Agent": "AIHallucinationDetector/2.0 (research project)"},
             )
-            search_data = search_resp.json()
+            search_data = self._parse_json_response(search_resp, "Wikipedia search")
+            if not search_data:
+                return []
             results = search_data.get("query", {}).get("search", [])
 
-            for result in results[:3]:
-                title = result.get("title", "")
-                snippet_html = result.get("snippet", "")
-                # Strip HTML tags from snippet
-                snippet_clean = re.sub(r"<[^>]+>", "", snippet_html)
+            async def _fetch_extract(title: str) -> Optional[tuple[str, str]]:
+                try:
+                    extract_resp = await client.get(
+                        "https://en.wikipedia.org/w/api.php",
+                        params={
+                            "action": "query",
+                            "prop": "extracts",
+                            "exintro": 1,
+                            "explaintext": 1,
+                            "titles": title,
+                            "format": "json",
+                        },
+                    )
+                    extract_data = self._parse_json_response(extract_resp, "Wikipedia extract")
+                    if not extract_data:
+                        return None
+                    pages = extract_data.get("query", {}).get("pages", {})
+                    for page in pages.values():
+                        text = page.get("extract", "")[:800]
+                        if text:
+                            return title, text
+                    return None
+                except Exception as e:
+                    logger.warning(f"Wikipedia extract for {title!r} failed: {e}")
+                    return None
 
-                # Step 2: Get article extract for more content
-                extract_resp = await client.get(
-                    "https://en.wikipedia.org/w/api.php",
-                    params={
-                        "action": "query",
-                        "prop": "extracts",
-                        "exintro": 1,
-                        "explaintext": 1,
-                        "titles": title,
-                        "format": "json",
-                    },
-                    headers={"User-Agent": "AIHallucinationDetector/2.0 (research project)"},
-                )
-                extract_data = extract_resp.json()
-                pages = extract_data.get("query", {}).get("pages", {})
-                extract_text = ""
-                for page in pages.values():
-                    extract_text = page.get("extract", "")[:800]
+            titles = [r.get("title", "") for r in results[:3] if r.get("title")]
+            snippets = {r.get("title", ""): re.sub(r"<[^>]+>", "", r.get("snippet", "")) for r in results[:3]}
+            # 3 篇简介并行抓取（原来串行 3×RTT，这里 1×RTT）
+            fetched = await asyncio.gather(*[_fetch_extract(t) for t in titles])
+            fetched_map = {t: txt for item in fetched if item for t, txt in [item]}
 
-                final_snippet = extract_text if extract_text else snippet_clean
+            for title in titles:
+                extract_text = fetched_map.get(title, "")
+                final_snippet = extract_text or snippets.get(title, "")
                 if final_snippet:
                     evidence.append(EvidencePiece(
                         source_type=SourceType.DIRECT_API,
@@ -313,7 +369,7 @@ class DomainSourceRouter:
     ) -> list[EvidencePiece]:
         """Search Wikidata for structured entity data."""
         evidence = []
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, headers=self._WIKI_HEADERS) as client:
             resp = await client.get(
                 "https://www.wikidata.org/w/api.php",
                 params={
@@ -323,9 +379,10 @@ class DomainSourceRouter:
                     "format": "json",
                     "limit": 3,
                 },
-                headers={"User-Agent": "AIHallucinationDetector/2.0"},
             )
-            data = resp.json()
+            data = self._parse_json_response(resp, "Wikidata")
+            if not data:
+                return []
             for entity in data.get("search", [])[:3]:
                 desc = entity.get("description", "")
                 label = entity.get("label", "")
@@ -364,6 +421,11 @@ class DomainSourceRouter:
                 logger.warning(f"Fact Check API returned {resp.status_code}")
                 return []
 
+            try:
+                from app.core.provider_usage import record_provider_call
+                await record_provider_call("factcheck")
+            except Exception:
+                pass
             data = resp.json()
             for claim_review in data.get("claims", [])[:3]:
                 claim_text = claim_review.get("text", "")
@@ -617,8 +679,12 @@ class DomainSourceRouter:
             if resp.status_code != 200:
                 return []
 
-            data = resp.json()
-            if len(data) < 2:
+            try:
+                data = resp.json()
+            except Exception as e:
+                logger.warning(f"World Bank JSON parse failed: {e}, skipped")
+                return []
+            if not isinstance(data, list) or len(data) < 2 or not data[1]:
                 return []
 
             for indicator in data[1][:3] if data[1] else []:
@@ -674,58 +740,78 @@ class DomainSourceRouter:
     # ── Tavily Domain-Filtered Search ─────────────────────────────────────
 
     async def _search_tavily_filtered(
-        self, query: str, domain: ClaimDomain,
+        self, query: str, domain: ClaimDomain, client=None,
     ) -> list[EvidencePiece]:
         """Search Tavily with domain-specific include/exclude filters."""
+        if client is None:
+            async with httpx.AsyncClient(timeout=15.0) as _c:
+                return await self._tavily_fetch(_c, query, domain)
+        return await self._tavily_fetch(client, query, domain)
+
+    async def _tavily_fetch(
+        self, client, query: str, domain: ClaimDomain,
+    ) -> list[EvidencePiece]:
         evidence = []
         include_domains = DOMAIN_ALLOWLISTS.get(domain.value, [])
         exclude_domains = GLOBAL_DOMAIN_BLOCKLIST
 
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            payload = {
-                "api_key": self.settings.tavily_api_key,
-                "query": query[:400],
-                "search_depth": "advanced",
-                "max_results": 5,
-                "include_answer": False,
-            }
-            if include_domains:
-                payload["include_domains"] = include_domains
-            if exclude_domains:
-                payload["exclude_domains"] = exclude_domains[:150]  # Tavily max 150
+        payload = {
+            "api_key": self.settings.tavily_api_key,
+            "query": query[:400],
+            "search_depth": "advanced",
+            "max_results": 5,
+            "include_answer": False,
+        }
+        if include_domains:
+            payload["include_domains"] = include_domains
+        if exclude_domains:
+            payload["exclude_domains"] = exclude_domains[:150]  # Tavily max 150
 
-            resp = await client.post(
-                "https://api.tavily.com/search",
-                json=payload,
-            )
-            if resp.status_code != 200:
-                logger.warning(f"Tavily returned {resp.status_code}")
-                return []
+        resp = await client.post(
+            "https://api.tavily.com/search",
+            json=payload,
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Tavily returned {resp.status_code}")
+            return []
 
-            data = resp.json()
-            for result in data.get("results", [])[:5]:
-                title = result.get("title", "")
-                content = result.get("content", "")
-                url = result.get("url", "")
-                # Prefer raw_content if available (full page text)
-                raw = result.get("raw_content", "")
-                snippet = raw[:1000] if raw else content[:1000]
-                if snippet:
-                    evidence.append(EvidencePiece(
-                        source_type=SourceType.WEB_SEARCH,
-                        source_tier=SourceTier.TAVILY,
-                        source_url=url,
-                        source_title=title[:200],
-                        snippet=snippet,
-                    ))
+        try:
+            from app.core.provider_usage import record_provider_call
+            await record_provider_call("tavily")
+        except Exception:
+            pass
+        data = resp.json()
+        for result in data.get("results", [])[:5]:
+            title = result.get("title", "")
+            content = result.get("content", "")
+            url = result.get("url", "")
+            # Prefer raw_content if available (full page text)
+            raw = result.get("raw_content", "")
+            snippet = raw[:1000] if raw else content[:1000]
+            if snippet:
+                evidence.append(EvidencePiece(
+                    source_type=SourceType.WEB_SEARCH,
+                    source_tier=SourceTier.TAVILY,
+                    source_url=url,
+                    source_title=title[:200],
+                    snippet=snippet,
+                ))
         return evidence
 
     # ── Serper Domain-Filtered Search ─────────────────────────────────────
 
     async def _search_serper_filtered(
-        self, query: str, domain: ClaimDomain,
+        self, query: str, domain: ClaimDomain, client=None,
     ) -> list[EvidencePiece]:
         """Search Serper (Google) with site: operator for domain filtering."""
+        if client is None:
+            async with httpx.AsyncClient(timeout=10.0) as _c:
+                return await self._serper_fetch(_c, query, domain)
+        return await self._serper_fetch(client, query, domain)
+
+    async def _serper_fetch(
+        self, client, query: str, domain: ClaimDomain,
+    ) -> list[EvidencePiece]:
         evidence = []
         include_domains = DOMAIN_ALLOWLISTS.get(domain.value, [])
 
@@ -740,33 +826,37 @@ class DomainSourceRouter:
         for bad in GLOBAL_DOMAIN_BLOCKLIST[:5]:
             full_query += f" -site:{bad}"
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                "https://google.serper.dev/search",
-                json={
-                    "q": full_query[:500],
-                    "num": 5,
-                },
-                headers={
-                    "X-API-KEY": self.settings.serper_api_key,
-                    "Content-Type": "application/json",
-                },
-            )
-            if resp.status_code != 200:
-                logger.warning(f"Serper returned {resp.status_code}")
-                return []
+        resp = await client.post(
+            "https://google.serper.dev/search",
+            json={
+                "q": full_query[:500],
+                "num": 5,
+            },
+            headers={
+                "X-API-KEY": self.settings.serper_api_key,
+                "Content-Type": "application/json",
+            },
+        )
+        if resp.status_code != 200:
+            logger.warning(f"Serper returned {resp.status_code}")
+            return []
 
-            data = resp.json()
-            for result in data.get("organic", [])[:5]:
-                title = result.get("title", "")
-                snippet_text = result.get("snippet", "")
-                url = result.get("link", "")
-                if snippet_text:
-                    evidence.append(EvidencePiece(
-                        source_type=SourceType.WEB_SEARCH,
-                        source_tier=SourceTier.SERPER,
-                        source_url=url,
-                        source_title=title[:200],
-                        snippet=snippet_text[:1000],
-                    ))
+        try:
+            from app.core.provider_usage import record_provider_call
+            await record_provider_call("serper")
+        except Exception:
+            pass
+        data = resp.json()
+        for result in data.get("organic", [])[:5]:
+            title = result.get("title", "")
+            snippet_text = result.get("snippet", "")
+            url = result.get("link", "")
+            if snippet_text:
+                evidence.append(EvidencePiece(
+                    source_type=SourceType.WEB_SEARCH,
+                    source_tier=SourceTier.SERPER,
+                    source_url=url,
+                    source_title=title[:200],
+                    snippet=snippet_text[:1000],
+                ))
         return evidence

@@ -1,0 +1,229 @@
+INFO:     Started server process [11144]
+INFO:     Waiting for application startup.
+13:59:16 │ INFO     │ app.main                       │ ============================================================
+13:59:16 │ INFO     │ app.main                       │ \U0001f6e1\ufe0f  AI Hallucination Detection System — Starting Up
+13:59:16 │ INFO     │ app.main                       │ ============================================================
+13:59:17 │ INFO     │ app.core.nli_model             │ NLI backend: Groq judge (openai/gpt-oss-20b), no local model loaded
+13:59:17 │ INFO     │ app.main                       │ \u2705 NLI ready: {'backend': 'groq', 'model': 'openai/gpt-oss-20b', 'device': 'api'}
+13:59:26 │ INFO     │ app.core.ner_extractor         │ Loaded spaCy small model (en_core_web_sm)
+13:59:26 │ INFO     │ app.main                       │ \u2705 NER Model loaded (spaCy)
+13:59:26 │ INFO     │ app.main                       │ \u2705 Groq key configured
+13:59:26 │ INFO     │ app.main                       │ \u2705 Tavily web search configured
+13:59:26 │ INFO     │ app.main                       │ \U0001f4ca 1/3 LLM providers configured
+13:59:26 │ INFO     │ sqlalchemy.engine.Engine       │ select pg_catalog.version()
+13:59:26 │ INFO     │ sqlalchemy.engine.Engine       │ [raw sql] ()
+13:59:26 │ INFO     │ sqlalchemy.engine.Engine       │ select current_schema()
+13:59:26 │ INFO     │ sqlalchemy.engine.Engine       │ [raw sql] ()
+13:59:26 │ INFO     │ sqlalchemy.engine.Engine       │ show standard_conforming_strings
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ [raw sql] ()
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ CREATE TABLE IF NOT EXISTS api_keys (
+              id VARCHAR(36) PRIMARY KEY,
+              name VARCHAR(200) NOT NULL DEFAULT 'default',
+              prefix VARCHAR(20) NOT NULL,
+              key_hash VARCHAR(128) NOT NULL UNIQUE,
+              is_active BOOLEAN NOT NULL DEFAULT TRUE,
+              expires_at TIMESTAMPTZ NULL,
+              usage_count INTEGER NOT NULL DEFAULT 0,
+              last_used_at TIMESTAMPTZ NULL,
+              created_at TIMESTAMPTZ NULL DEFAULT NOW()
+            )
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00222s] ()
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ CREATE INDEX IF NOT EXISTS ix_api_keys_prefix ON api_keys (prefix)
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00093s] ()
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ CREATE TABLE IF NOT EXISTS provider_usage (
+              provider VARCHAR(50) PRIMARY KEY,
+              calls INTEGER NOT NULL DEFAULT 0,
+              last_used_at TIMESTAMPTZ NULL
+            )
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00089s] ()
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ ALTER TABLE analysis_results ADD COLUMN IF NOT EXISTS model_id VARCHAR(100)
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00098s] ()
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ ALTER TABLE documents ALTER COLUMN conversation_id DROP NOT NULL
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00342s] ()
+13:59:27 │ INFO     │ sqlalchemy.engine.Engine       │ COMMIT
+13:59:27 │ INFO     │ app.main                       │ API Keys table ready
+13:59:27 │ WARNING  │ app.main                       │ TRUTHLENS_API_KEY not set — external calls run in compatible-open mode
+13:59:27 │ INFO     │ app.main                       │ ============================================================
+13:59:27 │ INFO     │ app.main                       │ \U0001f680 Server ready!
+13:59:27 │ INFO     │ app.main                       │ ============================================================
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:6655 (Press CTRL+C to quit)
+13:59:47 │ INFO     │ app.core.document_processor    │ Processed global-kb-fix-c9a861.txt: 1 chunks
+13:59:47 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+13:59:47 │ INFO     │ sqlalchemy.engine.Engine       │ INSERT INTO documents (id, conversation_id, filename, content_type, uploaded_at) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::TIMESTAMP WITH TIME ZONE)
+13:59:47 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00186s] ('eee51113-f419-4eb5-850d-c39e5dbb3ee5', None, 'global-kb-fix-c9a861.txt', 'text/plain', datetime.datetime(2026, 9, 5, 5, 59, 47, 676841, tzinfo=datetime.timezone.utc))
+13:59:47 │ INFO     │ app.core.embeddings            │ Loading embedding model all-MiniLM-L6-v2 natively...
+13:59:47 │ INFO     │ sentence_transformers.base.model │ No device provided, using cpu
+13:59:48 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json "HTTP/1.1 307 Temporary Redirect"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+13:59:48 │ WARNING  │ huggingface_hub.utils._http    │ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+13:59:48 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/modules.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fmodules.json=&etag=%22952a9b81c0bfd99800fabf352f69c7ccd46c5e43%22 "HTTP/1.1 200 OK"
+13:59:49 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config_sentence_transformers.json "HTTP/1.1 307 Temporary Redirect"
+13:59:49 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/config_sentence_transformers.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fconfig_sentence_transformers.json=&etag=%22fd1b291129c607e5d49799f87cb219b27f98acdf%22 "HTTP/1.1 200 OK"
+13:59:49 │ INFO     │ sentence_transformers.base.model │ Loading SentenceTransformer model from sentence-transformers/all-MiniLM-L6-v2.
+13:59:50 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config_sentence_transformers.json "HTTP/1.1 307 Temporary Redirect"
+13:59:50 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/config_sentence_transformers.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fconfig_sentence_transformers.json=&etag=%22fd1b291129c607e5d49799f87cb219b27f98acdf%22 "HTTP/1.1 200 OK"
+13:59:50 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/README.md "HTTP/1.1 307 Temporary Redirect"
+13:59:50 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/README.md?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2FREADME.md=&etag=%2244af2e3b0fa3a0b6239e48422972bf755f28fde0%22 "HTTP/1.1 200 OK"
+13:59:51 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/modules.json "HTTP/1.1 307 Temporary Redirect"
+13:59:51 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/modules.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fmodules.json=&etag=%22952a9b81c0bfd99800fabf352f69c7ccd46c5e43%22 "HTTP/1.1 200 OK"
+13:59:51 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/sentence_bert_config.json "HTTP/1.1 307 Temporary Redirect"
+13:59:51 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/sentence_bert_config.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fsentence_bert_config.json=&etag=%2259d594003bf59880a884c574bf88ef7555bb0202%22 "HTTP/1.1 200 OK"
+13:59:52 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/adapter_config.json "HTTP/1.1 404 Not Found"
+13:59:52 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+13:59:52 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/config.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fconfig.json=&etag=%2272b987fd805cfa2b58c4c8c952b274a11bfd5a00%22 "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/103 [00:00<?, ?it/s]Loading weights:   1%|          | 1/103 [00:00<00:11,  8.92it/s]Loading weights: 100%|██████████| 103/103 [00:00<00:00, 792.95it/s]
+13:59:54 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/processor_config.json "HTTP/1.1 404 Not Found"
+13:59:54 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/preprocessor_config.json "HTTP/1.1 404 Not Found"
+13:59:54 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/video_preprocessor_config.json "HTTP/1.1 404 Not Found"
+13:59:54 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/preprocessor_config.json "HTTP/1.1 404 Not Found"
+13:59:55 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
+13:59:55 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/tokenizer_config.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Ftokenizer_config.json=&etag=%22c79f2b6a0cea6f4b564fed1938984bace9d30ff0%22 "HTTP/1.1 200 OK"
+13:59:55 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+13:59:55 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/config.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fconfig.json=&etag=%2272b987fd805cfa2b58c4c8c952b274a11bfd5a00%22 "HTTP/1.1 200 OK"
+13:59:56 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+13:59:56 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/config.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Fconfig.json=&etag=%2272b987fd805cfa2b58c4c8c952b274a11bfd5a00%22 "HTTP/1.1 200 OK"
+13:59:56 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
+13:59:56 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/tokenizer_config.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2Ftokenizer_config.json=&etag=%22c79f2b6a0cea6f4b564fed1938984bace9d30ff0%22 "HTTP/1.1 200 OK"
+13:59:57 │ INFO     │ httpx                          │ HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+13:59:57 │ INFO     │ httpx                          │ HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+13:59:57 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/1_Pooling/config.json "HTTP/1.1 307 Temporary Redirect"
+13:59:58 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/sentence-transformers/all-MiniLM-L6-v2/1110a243fdf4706b3f48f1d95db1a4f5529b4d41/1_Pooling%2Fconfig.json?%2Fsentence-transformers%2Fall-MiniLM-L6-v2%2Fresolve%2Fmain%2F1_Pooling%2Fconfig.json=&etag=%22d1514c3162bbe87b343f565fadc62e6c06f04f03%22 "HTTP/1.1 200 OK"
+13:59:58 │ INFO     │ httpx                          │ HTTP Request: HEAD https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/2_Normalize/config.json "HTTP/1.1 404 Not Found"
+13:59:58 │ INFO     │ httpx                          │ HTTP Request: GET https://huggingface.co/api/models/sentence-transformers/all-MiniLM-L6-v2 "HTTP/1.1 200 OK"
+13:59:58 │ INFO     │ app.core.embeddings            │ Native embedding model loaded successfully.
+Batches:   0%|          | 0/1 [00:00<?, ?it/s]Batches: 100%|██████████| 1/1 [00:02<00:00,  2.66s/it]Batches: 100%|██████████| 1/1 [00:02<00:00,  2.66s/it]
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ INSERT INTO document_chunks (id, document_id, chunk_index, text_content, embedding) VALUES ($1::VARCHAR, $2::VARCHAR, $3::INTEGER, $4::VARCHAR, $5)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00204s] ('14dfa879-b01d-4495-98df-571f9d438c32', 'eee51113-f419-4eb5-850d-c39e5dbb3ee5', 0, 'The Eiffel Tower is 330 metres tall and is located in Paris, France. It was completed in 1889. Paris is the capital of France.', '[0.06375426799058914,0.07161209732294083,0.02005103789269924,-0.010429523885250092,0.004556780215352774,0.0027376895304769278,-0.08258342742919922,0. ... (7734 characters truncated) ... 88813,-0.046835776418447495,0.02779439650475979,-0.039964910596609116,0.0448373407125473,0.03126358613371849,0.06080498546361923,0.05052429810166359]')
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ COMMIT
+14:00:01 │ INFO     │ app.api.documents              │ Document uploaded & embedded: global-kb-fix-c9a861.txt → eee51113-f419-4eb5-850d-c39e5dbb3ee5 (1 chunks)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT documents.id, documents.conversation_id, documents.filename, documents.content_type, documents.uploaded_at 
+FROM documents 
+WHERE documents.id = $1::VARCHAR
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00150s] ('eee51113-f419-4eb5-850d-c39e5dbb3ee5',)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT count(document_chunks.id) AS count_1 
+FROM document_chunks 
+WHERE document_chunks.document_id = $1::VARCHAR
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00193s] ('eee51113-f419-4eb5-850d-c39e5dbb3ee5',)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ ROLLBACK
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT documents.id, documents.conversation_id, documents.filename, documents.content_type, documents.uploaded_at 
+FROM documents 
+WHERE documents.id = $1::VARCHAR
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 0.04231s ago] ('eee51113-f419-4eb5-850d-c39e5dbb3ee5',)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT document_chunks.id AS document_chunks_id, document_chunks.document_id AS document_chunks_document_id, document_chunks.chunk_index AS document_chunks_chunk_index, document_chunks.text_content AS document_chunks_text_content, document_chunks.embedding AS document_chunks_embedding 
+FROM document_chunks 
+WHERE $1::VARCHAR = document_chunks.document_id
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00280s] ('eee51113-f419-4eb5-850d-c39e5dbb3ee5',)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ DELETE FROM document_chunks WHERE document_chunks.id = $1::VARCHAR
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00144s] ('14dfa879-b01d-4495-98df-571f9d438c32',)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ DELETE FROM documents WHERE documents.id = $1::VARCHAR
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00237s] ('eee51113-f419-4eb5-850d-c39e5dbb3ee5',)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ COMMIT
+14:00:01 │ INFO     │ app.api.documents              │ Document deleted: eee51113-f419-4eb5-850d-c39e5dbb3ee5
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT conversations.id, conversations.external_id, conversations.platform, conversations.title, conversations.external_url, conversations.created_at, conversations.updated_at, conversations.metadata_json, conversations.last_synced_message_index 
+FROM conversations 
+WHERE conversations.external_id = $1::VARCHAR AND conversations.platform = $2::VARCHAR
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00128s] ('ext-fix-ab157d45', 'chatgpt')
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ INSERT INTO conversations (id, external_id, platform, title, external_url, created_at, updated_at, metadata_json, last_synced_message_index) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::VARCHAR, $6::TIMESTAMP WITH TIME ZONE, $7::TIMESTAMP WITH TIME ZONE, $8::JSONB, $9::INTEGER)
+14:00:01 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00135s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b', 'ext-fix-ab157d45', 'chatgpt', '修复验证', None, datetime.datetime(2026, 9, 5, 6, 0, 1, 997358, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 9, 5, 6, 0, 1, 997358, tzinfo=datetime.timezone.utc), '{}', -1)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT messages.external_id 
+FROM messages 
+WHERE messages.conversation_id = $1::VARCHAR AND messages.external_id IS NOT NULL
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00118s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ UPDATE conversations SET updated_at=$1::TIMESTAMP WITH TIME ZONE WHERE conversations.id = $2::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00113s] (datetime.datetime(2026, 9, 5, 6, 0, 2, 7364, tzinfo=datetime.timezone.utc), '88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b')
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ INSERT INTO messages (id, conversation_id, role, content, created_at, external_id, message_index, role_index, model_id, platform_sources, analysis_result_id) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::TIMESTAMP WITH TIME ZONE, $6::VARCHAR, $7::INTEGER, $8::INTEGER, $9::VARCHAR, $10::JSONB, $11::VARCHAR), ($12::VARCHAR, $13::VARCHAR, $14::VARCHAR, $15::VARCHAR, $16::TIMESTAMP WITH TIME ZONE, $17::VARCHAR, $18::INTEGER, $19::INTEGER, $20::VARCHAR, $21::JSONB, $22::VARCHAR)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00022s (insertmanyvalues) 1/1 (unordered)] ('084be3c5-804d-4397-a9de-84cf4582be8a', '88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b', 'user', '第一条', datetime.datetime(2026, 9, 5, 6, 0, 2, 7364, tzinfo=datetime.timezone.utc), 'user-0', None, None, None, '[]', None, 'b4fdb558-b829-467e-8e14-a37394b3359f', '88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b', 'assistant', '第一条回复', datetime.datetime(2026, 9, 5, 6, 0, 2, 7364, tzinfo=datetime.timezone.utc), 'assistant-1', 1, None, 'chatgpt_extension', '[]', None)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT count(messages.id) AS count_1 
+FROM messages 
+WHERE messages.conversation_id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00131s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT documents.id 
+FROM documents 
+WHERE documents.conversation_id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00115s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ COMMIT
+14:00:02 │ INFO     │ app.api.conversations          │ Created conversation 88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b (chatgpt/ext-fix-ab157d45): 2 new messages, 2 total
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT conversations.id, conversations.external_id, conversations.platform, conversations.title, conversations.external_url, conversations.created_at, conversations.updated_at, conversations.metadata_json, conversations.last_synced_message_index 
+FROM conversations 
+WHERE conversations.external_id = $1::VARCHAR AND conversations.platform = $2::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 0.08048s ago] ('ext-fix-ab157d45', 'chatgpt')
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT messages.external_id 
+FROM messages 
+WHERE messages.conversation_id = $1::VARCHAR AND messages.external_id IS NOT NULL
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 0.07427s ago] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ UPDATE conversations SET updated_at=$1::TIMESTAMP WITH TIME ZONE WHERE conversations.id = $2::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 0.07415s ago] (datetime.datetime(2026, 9, 5, 6, 0, 2, 81066, tzinfo=datetime.timezone.utc), '88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b')
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ INSERT INTO messages (id, conversation_id, role, content, created_at, external_id, message_index, role_index, model_id, platform_sources, analysis_result_id) VALUES ($1::VARCHAR, $2::VARCHAR, $3::VARCHAR, $4::VARCHAR, $5::TIMESTAMP WITH TIME ZONE, $6::VARCHAR, $7::INTEGER, $8::INTEGER, $9::VARCHAR, $10::JSONB, $11::VARCHAR)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00119s] ('fc63e68a-f4fb-4515-b2d4-37e21e7eeb63', '88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b', 'assistant', '第二条回复', datetime.datetime(2026, 9, 5, 6, 0, 2, 81066, tzinfo=datetime.timezone.utc), 'assistant-2', 2, 1, 'chatgpt_extension', '[]', None)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT count(messages.id) AS count_1 
+FROM messages 
+WHERE messages.conversation_id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 0.06721s ago] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT documents.id 
+FROM documents 
+WHERE documents.conversation_id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 0.06713s ago] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ COMMIT
+14:00:02 │ INFO     │ app.api.conversations          │ Updated conversation 88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b (chatgpt/ext-fix-ab157d45): 1 new messages, 3 total
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT conversations.id, conversations.external_id, conversations.platform, conversations.title, conversations.external_url, conversations.created_at, conversations.updated_at, conversations.metadata_json, conversations.last_synced_message_index 
+FROM conversations 
+WHERE conversations.id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00120s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT messages.conversation_id AS messages_conversation_id, messages.id AS messages_id, messages.role AS messages_role, messages.content AS messages_content, messages.created_at AS messages_created_at, messages.external_id AS messages_external_id, messages.message_index AS messages_message_index, messages.role_index AS messages_role_index, messages.model_id AS messages_model_id, messages.platform_sources AS messages_platform_sources, messages.analysis_result_id AS messages_analysis_result_id 
+FROM messages 
+WHERE messages.conversation_id IN ($1::VARCHAR) ORDER BY messages.created_at
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00245s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ ROLLBACK
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT conversations.id, conversations.external_id, conversations.platform, conversations.title, conversations.external_url, conversations.created_at, conversations.updated_at, conversations.metadata_json, conversations.last_synced_message_index 
+FROM conversations 
+WHERE conversations.id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00117s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT messages.analysis_result_id 
+FROM messages 
+WHERE messages.conversation_id = $1::VARCHAR AND messages.analysis_result_id IS NOT NULL
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00165s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT messages.id AS messages_id, messages.conversation_id AS messages_conversation_id, messages.role AS messages_role, messages.content AS messages_content, messages.created_at AS messages_created_at, messages.external_id AS messages_external_id, messages.message_index AS messages_message_index, messages.role_index AS messages_role_index, messages.model_id AS messages_model_id, messages.platform_sources AS messages_platform_sources, messages.analysis_result_id AS messages_analysis_result_id 
+FROM messages 
+WHERE $1::VARCHAR = messages.conversation_id ORDER BY messages.created_at
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00194s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT extracted_entities.id AS extracted_entities_id, extracted_entities.conversation_id AS extracted_entities_conversation_id, extracted_entities.name AS extracted_entities_name, extracted_entities.label AS extracted_entities_label, extracted_entities.source_message_id AS extracted_entities_source_message_id, extracted_entities.message_index AS extracted_entities_message_index, extracted_entities.created_at AS extracted_entities_created_at 
+FROM extracted_entities 
+WHERE $1::VARCHAR = extracted_entities.conversation_id
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00124s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT documents.id AS documents_id, documents.conversation_id AS documents_conversation_id, documents.filename AS documents_filename, documents.content_type AS documents_content_type, documents.uploaded_at AS documents_uploaded_at 
+FROM documents 
+WHERE $1::VARCHAR = documents.conversation_id
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00141s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ DELETE FROM messages WHERE messages.id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00142s] [('084be3c5-804d-4397-a9de-84cf4582be8a',), ('b4fdb558-b829-467e-8e14-a37394b3359f',), ('fc63e68a-f4fb-4515-b2d4-37e21e7eeb63',)]
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ DELETE FROM conversations WHERE conversations.id = $1::VARCHAR
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00203s] ('88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b',)
+14:00:02 │ INFO     │ sqlalchemy.engine.Engine       │ COMMIT
+14:00:02 │ INFO     │ app.api.conversations          │ Conversation deleted: 88f81c7b-99e6-48e5-a4cf-ec558ac7eb1b (analysis_records=0)
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT conversations.id, conversations.external_id, conversations.platform, conversations.title, conversations.external_url, conversations.created_at, conversations.updated_at, conversations.metadata_json, conversations.last_synced_message_index 
+FROM conversations 
+WHERE conversations.id = $1::VARCHAR
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 5302s ago] ('c95f48f5-68d9-4483-a344-b26e1b6c0cf2',)
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ BEGIN (implicit)
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT documents.id, documents.conversation_id, documents.filename, documents.content_type, documents.uploaded_at 
+FROM documents 
+WHERE documents.conversation_id IS NULL
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00337s] ()
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT messages.conversation_id AS messages_conversation_id, messages.id AS messages_id, messages.role AS messages_role, messages.content AS messages_content, messages.created_at AS messages_created_at, messages.external_id AS messages_external_id, messages.message_index AS messages_message_index, messages.role_index AS messages_role_index, messages.model_id AS messages_model_id, messages.platform_sources AS messages_platform_sources, messages.analysis_result_id AS messages_analysis_result_id 
+FROM messages 
+WHERE messages.conversation_id IN ($1::VARCHAR) ORDER BY messages.created_at
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ [cached since 5302s ago] ('c95f48f5-68d9-4483-a344-b26e1b6c0cf2',)
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ SELECT document_chunks.document_id, count(document_chunks.id) AS count_1 
+FROM document_chunks GROUP BY document_chunks.document_id
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ [generated in 0.00196s] ()
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ ROLLBACK
+15:28:24 │ INFO     │ sqlalchemy.engine.Engine       │ ROLLBACK

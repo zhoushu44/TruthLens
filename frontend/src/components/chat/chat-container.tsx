@@ -33,18 +33,24 @@ export function ChatContainer({ activeChatId }: ChatContainerProps) {
   const [modelsLoading, setModelsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ── Load models from backend on mount ──────────────────────────────────
+  // ── Load models from backend on mount (+ 设置页保存后自动刷新) ─────────
   useEffect(() => {
-    fetchModels()
-      .then((data) => {
-        const available = data.filter((m) => m.available);
-        setModels(available);
-      })
-      .catch((e) => {
-        console.error("Failed to load models:", e);
-        setError("Backend unreachable — is the server running on :8000 ?");
-      })
-      .finally(() => setModelsLoading(false));
+    const load = () => {
+      fetchModels()
+        .then((data) => {
+          const available = data.filter((m) => m.available);
+          setModels(available);
+        })
+        .catch((e) => {
+          console.error("Failed to load models:", e);
+          setError("Backend unreachable — is the server running on :8000 ?");
+        })
+        .finally(() => setModelsLoading(false));
+    };
+    load();
+    const onSaved = () => load();
+    window.addEventListener("provider-settings-saved", onSaved);
+    return () => window.removeEventListener("provider-settings-saved", onSaved);
   }, []);
 
   // ── Reset panes on new session ──────────────────────────────────────────
@@ -397,3 +403,4 @@ export function ChatContainer({ activeChatId }: ChatContainerProps) {
     </>
   );
 }
+

@@ -1,4 +1,31 @@
-const API_BASE = "http://localhost:8000/api/v1";
+function resolveApiBase(): string {
+  const envBase = (import.meta as any).env?.VITE_API_BASE as string | undefined;
+  if (envBase) return envBase;
+  if (typeof window !== "undefined") {
+    if (window.location.port === "5173") return "http://localhost:8000/api/v1";
+    if (window.location.port === "6655") return `${window.location.origin}/api/v1`;
+    if (window.location.origin.startsWith("http")) return `${window.location.origin}/api/v1`;
+  }
+  return "http://localhost:6655/api/v1";
+}
+const API_BASE = resolveApiBase();
+export function getApiBase(): string { return API_BASE; }
+export function getServerOrigin(): string {
+  try {
+    const u = new URL(API_BASE);
+    return `${u.protocol}//${u.host}`;
+  } catch { return window.location.origin; }
+}
+export function getStoredApiKey(): string { try { return localStorage.getItem("truthlens_api_key") || ""; } catch { return ""; } }
+export function setStoredApiKey(k: string): void { try { k ? localStorage.setItem("truthlens_api_key", k) : localStorage.removeItem("truthlens_api_key"); } catch {} }
+export function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const k = getStoredApiKey();
+  return k ? { ...extra, Authorization: `Bearer ${k}` } : { ...extra };
+}
+export function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const merged: RequestInit = { ...init, headers: { ...authHeaders(), ...(init.headers || {}) } };
+  return fetch(input, merged);
+}
 
 export interface BackendModel {
   id: string;
@@ -167,28 +194,46 @@ export interface AnalyticsTimelinePoint {
   confidence: number;
 }
 
+export interface AnalyticsApiKeyStat {
+  id: string;
+  name: string;
+  prefix: string;
+  is_active: boolean;
+  usage_count: number;
+  last_used_at: string | null;
+}
+
+export interface AnalyticsProviderStat {
+  id: string;
+  label?: string | null;
+  calls: number;
+  last_used_at: string | null;
+}
+
 export interface AnalyticsOverview {
   days: number;
   generated_at: string;
   summary: AnalyticsSummary;
   models: AnalyticsModelStat[];
   timeline: AnalyticsTimelinePoint[];
+  api_keys?: AnalyticsApiKeyStat[];
+  providers?: AnalyticsProviderStat[];
 }
 
 export async function fetchConversations(): Promise<Conversation[]> {
-  const res = await fetch(`${API_BASE}/conversations`);
+  const res = await apiFetch(`${API_BASE}/conversations`);
   if (!res.ok) throw new Error("Failed to fetch conversations");
   return res.json() as Promise<Conversation[]>;
 }
 
 export async function getConversation(id: string): Promise<Conversation> {
-  const res = await fetch(`${API_BASE}/conversations/${id}`);
+  const res = await apiFetch(`${API_BASE}/conversations/${id}`);
   if (!res.ok) throw new Error("Failed to load conversation");
   return res.json() as Promise<Conversation>;
 }
 
 export async function createConversation(title: string = "New Session"): Promise<Conversation> {
-  const res = await fetch(`${API_BASE}/conversations`, {
+  const res = await apiFetch(`${API_BASE}/conversations`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ metadata: { title } })
@@ -198,7 +243,7 @@ export async function createConversation(title: string = "New Session"): Promise
 }
 
 export async function deleteConversation(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/conversations/${id}`, {
+  const res = await apiFetch(`${API_BASE}/conversations/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -207,7 +252,7 @@ export async function deleteConversation(id: string): Promise<void> {
 }
 
 export async function fetchAnalyticsOverview(days: number = 7): Promise<AnalyticsOverview> {
-  const res = await fetch(`${API_BASE}/analytics/overview?days=${days}`);
+  const res = await apiFetch(`${API_BASE}/analytics/overview?days=${days}`);
   if (!res.ok) throw new Error("Failed to fetch analytics overview");
   return res.json() as Promise<AnalyticsOverview>;
 }
@@ -218,7 +263,7 @@ export async function addMessageToConversation(
   content: string,
   modelId?: string
 ): Promise<Conversation["messages"][number]> {
-  const res = await fetch(`${API_BASE}/conversations/${convId}/messages`, {
+  const res = await apiFetch(`${API_BASE}/conversations/${convId}/messages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role, content, model_id: modelId })
@@ -229,7 +274,7 @@ export async function addMessageToConversation(
 
 /** Fetch all available models from the backend. (MOCKED) */
 export async function fetchModels(): Promise<BackendModel[]> {
-  const res = await fetch(`${API_BASE}/models`);
+  const res = await apiFetch(`${API_BASE}/models`);
   if (!res.ok) throw new Error("Failed to fetch models");
   const data = await res.json();
   const modelsList = Array.isArray(data) ? data : data.models || [];
@@ -261,7 +306,7 @@ export async function uploadDocument(file: File, conversationId?: string): Promi
   formData.append("file", file);
   if (conversationId) formData.append("conversation_id", conversationId);
   
-  const res = await fetch(`${API_BASE}/documents/upload`, {
+  const res = await apiFetch(`${API_BASE}/documents/upload`, {
     method: "POST",
     body: formData
   });
@@ -270,20 +315,20 @@ export async function uploadDocument(file: File, conversationId?: string): Promi
 }
 
 export async function getDocument(docId: string): Promise<DocumentResponse> {
-  const res = await fetch(`${API_BASE}/documents/${docId}`);
+  const res = await apiFetch(`${API_BASE}/documents/${docId}`);
   if (!res.ok) throw new Error("Failed to get document");
   return res.json();
 }
 
 export async function getGlobalDocuments(): Promise<DocumentResponse[]> {
-  const res = await fetch(`${API_BASE}/documents?global_only=true`);
+  const res = await apiFetch(`${API_BASE}/documents?global_only=true`);
   if (!res.ok) throw new Error("Failed to fetch global documents");
   const data = await res.json();
   return data.documents;
 }
 
 export async function deleteDocument(docId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/documents/${docId}`, {
+  const res = await apiFetch(`${API_BASE}/documents/${docId}`, {
     method: "DELETE"
   });
   if (!res.ok) throw new Error("Failed to delete document");
@@ -295,7 +340,7 @@ export async function sendChatMessage(
   message: string,
   history: ChatMessage[]
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/chat`, {
+  const res = await apiFetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -320,7 +365,7 @@ export async function sendChatMessageStream(
   history: ChatMessage[],
   onChunk: (chunk: string) => void
 ): Promise<string> {
-  const res = await fetch(`${API_BASE}/chat`, {
+  const res = await apiFetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -378,7 +423,7 @@ export async function detectHallucinations(
   conversationId?: string,
   assistantMessageId?: string,
 ): Promise<DetectionResult> {
-  const res = await fetch(`${API_BASE}/detect`, {
+  const res = await apiFetch(`${API_BASE}/detect`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -404,3 +449,56 @@ export function scoreToRisk(score: number): "none" | "green" | "amber" | "red" {
   if (score <= 65) return "amber";
   return "red";
 }
+
+
+export interface ApiKeyItem { id: string; name: string; prefix: string; is_active: boolean; expires_at: string | null; usage_count: number; last_used_at: string | null; created_at: string | null; }
+export interface ApiKeyStatus { server_port: number; master_configured: boolean; master_prefix: string | null; api_key_required: boolean; auth_header: string; detect_url: string; openai_chat_url: string; openai_models_url: string; swagger_url: string; }
+export async function fetchApiKeyStatus(): Promise<ApiKeyStatus> {
+  const res = await apiFetch(`${API_BASE}/apikeys/status`);
+  if (!res.ok) throw new Error("无法获取服务状态");
+  return res.json();
+}
+export async function fetchApiKeys(): Promise<ApiKeyItem[]> {
+  const res = await apiFetch(`${API_BASE}/apikeys`);
+  if (!res.ok) throw new Error("获取 Key 列表失败");
+  const data = await res.json();
+  return data.keys || [];
+}
+export async function createApiKey(name: string): Promise<{ id: string; name: string; prefix: string; api_key: string; tip: string }> {
+  const res = await apiFetch(`${API_BASE}/apikeys`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+  if (!res.ok) throw new Error("创建 Key 失败");
+  return res.json();
+}
+export async function revokeApiKey(id: string): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/apikeys/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("吊销失败");
+}
+export async function tryDetectWithKey(apiKey: string, text: string): Promise<any> {
+  const origin = getServerOrigin();
+  const res = await fetch(`${origin}/api/v1/detect`, { method: "POST", headers: { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) }, body: JSON.stringify({ model_response: text, conversation_history: [], config: { check_web: true, check_documents: true, check_conversation: true } }) });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).detail || `调用失败 ${res.status}`); }
+  return res.json();
+}
+
+/* ---- Provider Keys / URLs（模型 Key 与搜索 Key 设置页） ---- */
+export interface ProviderSettingItem { key: string; label: string; category: string; required: string; required_level: string; description: string; placeholder: string; secret: boolean; configured: boolean; masked: string; value: string; }
+export interface EffectiveSummary { claim_ready: boolean; claim_channel: string; adjudicator: string; chat_models: string[]; chat_models_count: number; web_search: boolean; web_providers: string[]; }
+export async function fetchProviderSettings(): Promise<{ items: ProviderSettingItem[]; effective: EffectiveSummary }> {
+  const res = await apiFetch(`${API_BASE}/settings/status`);
+  if (!res.ok) throw new Error("获取 Key 配置状态失败");
+  return res.json();
+}
+export async function saveProviderSettings(values: Record<string, string>): Promise<{ ok: boolean; updated: string[]; effective: EffectiveSummary }> {
+  const res = await apiFetch(`${API_BASE}/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ values }) });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).detail || "保存失败"); }
+  return res.json();
+}
+export function openProviderSettings(): void { try { window.dispatchEvent(new CustomEvent("open-provider-settings")); } catch {} }
+
+export interface ProviderTestResult { ok: boolean; detail: string; latency_ms: number; tested_with: string; }
+export async function testProviderKey(key: string, value?: string): Promise<ProviderTestResult> {
+  const res = await apiFetch(`${API_BASE}/settings/test`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, value: value ?? null }) });
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error((e as any).detail || "测试请求失败"); }
+  return res.json();
+}
+

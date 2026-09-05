@@ -1,0 +1,21 @@
+[PASS] 公开: /health 无Key 200  HTTP 200
+[PASS] 公开: /apikeys/status 无Key  HTTP 200 (管理页设计为无鉴权)
+[PASS] 强制: GET /v1/models 无Key  HTTP 401 {"detail":"缺少或无效的 API Key，请在请求头带 Authorization: Bearer tl-xxx"}
+[PASS] 强制: POST /v1/chat/completions 无Key  HTTP 401 {"detail":"缺少或无效的 API Key，请在请求头带 Authorization: Bearer tl-xxx"}
+[PASS] 强制: POST /api/v1/chat 无Key  HTTP 401 {"detail":"缺少或无效的 API Key，请在请求头带 Authorization: Bearer tl-xxx"}
+[PASS] 强制: POST /api/v1/detect 无Key  HTTP 401 {"detail":"缺少或无效的 API Key，请在请求头带 Authorization: Bearer tl-xxx"}
+[PASS] 强制: 无效Key 401  HTTP 401
+[PASS] 强制: X-API-Key 无效 401  HTTP 401
+[PASS] 强制: 主Key Bearer 200  HTTP 200
+[PASS] 强制: 主Key X-API-Key 200  HTTP 200
+[PASS] 强制: 创建子Key(管理端点开放)  HTTP 200 prefix=tl-7If26iu
+[PASS] 强制: 子Key 放行 200  HTTP 200
+[PASS] 强制: 吊销子Key  HTTP 200
+[PASS] 强制: 已吊销子Key 401  HTTP 401 {"detail":"缺少或无效的 API Key，请在请求头带 Authorization: Bearer tl-xxx"}
+[PASS] 观察: 强制模式下 GET /conversations 无Key  HTTP 200 (无鉴权依赖→仍开放)
+[PASS] 观察: 强制模式下 GET /settings/status 无Key  HTTP 200 (无鉴权依赖→仍开放)
+[PASS] 观察: 强制模式下 GET /analytics/overview 无Key  HTTP 200 (无鉴权依赖→仍开放)
+[PASS] 观察: 强制模式下 GET /documents 无Key  HTTP 200 (无鉴权依赖→仍开放)
+
+============================================================
+AUTH TOTAL=18 PASS=18 FAIL=0

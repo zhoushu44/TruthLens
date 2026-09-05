@@ -1,0 +1,90 @@
+# ── TruthLens: push 到 main/master 自动构建镜像并推送 Docker Hub ──────────
+#
+# 前置条件（一次性，在仓库 Settings → Secrets and variables → Actions 添加）：
+#   DOCKER_HUB_USERNAME  → Docker Hub 用户名
+#   DOCKER_HUB_TOKEN     → Docker Hub Access Token（需有 "Read, Write, Delete" 权限）
+#
+# 行为：
+#   * 触发分支：main 与 master（push 时触发，也支持手动 workflow_dispatch）
+#   * 镜像名：<DOCKER_HUB_USERNAME>/<当前GitHub仓库名>（自动小写，无需额外配置；
+#     请确保 Docker Hub 上已存在同名仓库，或允许 push 时自动创建）
+#   * 标签：固定 4.1 与 latest（同一镜像同时打两个 tag 并推送）
+#   * 服务在容器内监听 0.0.0.0:${PORT:-6655}（见 backend/Dockerfile）
+#
+name: Docker Hub Build & Push
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - "**/*.md"
+      - ".github/**"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-hub-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    # 两个 Secrets 必须存在，否则直接失败并提示（避免浪费构建时间）
+    if: ${{ secrets.DOCKER_HUB_USERNAME != '' && secrets.DOCKER_HUB_TOKEN != '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image name
+        id: image
+        env:
+          HUB_USER: ${{ secrets.DOCKER_HUB_USERNAME }}
+          GH_REPO: ${{ github.event.repository.name }}
+        run: |
+          # Docker Hub 镜像名只允许小写：<用户名>/<GitHub仓库名>
+          IMG="$(printf '%s/%s' "${HUB_USER}" "${GH_REPO}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=${IMG}" >> "$GITHUB_OUTPUT"
+          echo "Pushing to: ${IMG}"
+
+      - name: Build tags
+        id: tags
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+        run: |
+          # 固定版本标签：同一镜像同时打 4.1 与 latest 两个 tag 并推送
+          TAGS=(
+            "${IMAGE}:4.1"
+            "${IMAGE}:latest"
+          )
+
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "${TAGS[@]}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Tags to push:\n'
+          printf '%s\n' "${TAGS[@]}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          # 国内构建如需走 HF 镜像源，取消下行注释后 push 生效：
+          # build-args: |
+          #   HF_ENDPOINT=https://hf-mirror.com
+          cache-from: type=gha,scope=${{ github.ref_name }}
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}

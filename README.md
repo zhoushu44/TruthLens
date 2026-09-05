@@ -6,6 +6,148 @@ A production-grade system that intercepts AI-generated responses, extracts claim
 
 ---
 
+## 🇨🇳 中文部署教程（本分支）
+
+> 🙏 **致谢原作者**：本项目基于 **prajwalmandlecha** 的开源项目
+> [hallucinationdetection](https://github.com/prajwalmandlecha/hallucinationdetection)
+> 二次开发，核心检测管线（声明提取 → 多源验证 → NLI 判定 → LLM 裁决）的设计归功于原作者。
+> 本分支的改动点见 [🆕 与原方案的差异](#-与原方案的差异)。
+
+### 0. 端口一览（先记住这两个）
+
+| 端口 | 说明 |
+|---|---|
+| **6655** | **WebUI + 后端 API（单端口）**：浏览器打开 `http://localhost:6655`；接口文档 `http://localhost:6655/docs` |
+| **5433** | PostgreSQL（`docker compose` 把容器内 5432 映射到宿主机 **5433**，避免与本机 postgres 冲突） |
+
+### 1. 最快上手：直接拉 Docker Hub 镜像运行
+
+前置：安装 Docker Desktop；准备好一个 PostgreSQL（需 `pgvector` 扩展；没有的话用第 2 节 compose 自带的一键起）。
+
+```bash
+# 拉镜像（4.1 与 latest 是同一镜像的两个标签）
+docker pull zhoushu1/truthlens:4.1
+
+# 运行（把下面 xxx 换成你自己的 Key / 数据库地址）
+docker run -d --name truthlens --restart unless-stopped \
+  -p 6655:6655 \
+  -e DATABASE_URL="postgresql+asyncpg://detection_admin:detection_pass@host.docker.internal:5433/ai_detection" \
+  -e GROQ_API_KEY="xxx" \
+  -e ZEN_API_KEY="xxx" \
+  -e ZEN_BASE_URL="https://opencode.ai/zen/go/v1" \
+  -e ZEN_MODEL="mimo-v2.5" \
+  -e TAVILY_API_KEY="xxx" \
+  -e SERPER_API_KEY="xxx" \
+  zhoushu1/truthlens:4.1
+
+# 看日志，出现 "Server ready!" 即启动成功（首次启动要加载 spaCy/向量模型，多等半分钟）
+docker logs -f truthlens
+```
+
+然后打开 **`http://localhost:6655`** 即用；Swagger 文档：`http://localhost:6655/docs`。
+
+> Windows（PowerShell）用户：把上面的 `\` 换行符去掉拼成一行执行，或直接用第 2 节的 compose 方式。
+
+Key 配置速查（也可运行时不传，进 WebUI 的「设置」页可视化填写，保存即热重载生效）：
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `GROQ_API_KEY` | 三选一 | 聊天 + 声明提取主通道（最快），三者至少填一个 |
+| `NVIDIA_API_KEY` / `OPENROUTER_API_KEY` | 三选一 | 备用/兜底通道 |
+| `ZEN_API_KEY` + `ZEN_BASE_URL` + `ZEN_MODEL` | 推荐 | 最终裁决通道（OpenAI 兼容网关，默认 mimo-v2.5） |
+| `TAVILY_API_KEY` | 推荐 | 联网验证主力 |
+| `SERPER_API_KEY` | 选填 | Google 聚合搜索，垂直领域召回更好 |
+| `TRUTHLENS_API_KEY` | 选填 | 主调用 Key（`tl-` 开头）；留空 = 兼容开放模式 |
+| `API_KEY_REQUIRED` | 选填 | `True` = 外部调用 detect/chat 强制要 Key |
+| `DATABASE_URL` | 必填（单容器运行时） | 指向你的 Postgres，格式见上例 |
+
+### 2. 推荐：docker compose 全栈（含数据库，一条命令）
+
+```bash
+# 1. 配 Key（复制模板后填写）
+cp backend/.env.example backend/.env
+# 用记事本打开 backend/.env，按上表填 GROQ / ZEN / TAVILY 等 Key
+
+# 2. 启动（自动构建 CPU 版镜像 + pgvector 数据库）
+docker compose up -d --build
+
+# 3. 看日志 / 打开页面
+docker compose logs -f backend
+# 浏览器打开 http://localhost:6655
+
+# 停止（保留数据）
+docker compose down
+# 停止并清空数据库数据卷
+docker compose down -v
+```
+
+### 3. 本地开发（Windows，不用 Docker）
+
+```powershell
+# 1. 只起数据库
+docker compose up -d postgres
+
+# 2. 后端
+cd backend
+.\venv\Scripts\Activate.ps1   # 没有 venv 就先 python -m venv venv
+pip install -r requirements.txt
+python -m spacy download en_core_web_sm
+copy .env.example .env   # 填写各家 Key
+uvicorn app.main:app --host 0.0.0.0 --port 6655
+
+# 3. 前端（另开一个终端）
+cd frontend
+npm install
+npm run dev      # 开发模式 http://localhost:5173
+npm run build    # 构建产物到 frontend/dist，后端 6655 会自动挂载
+```
+
+### 4. 浏览器扩展（Chrome / Edge）
+
+`chrome://extensions` → 右上打开「开发者模式」→「加载已解压的扩展程序」→ 选择本仓库的 `extension/` 目录。
+扩展会把各大 AI 网站的对话同步到后端（默认 `http://127.0.0.1:6655`）做幻觉检测。
+
+### 5. 常用命令与排错
+
+```bash
+docker ps                                   # 看容器是否在跑
+docker logs -f truthlens                    # 看日志
+docker stop truthlens && docker rm truthlens  # 停掉单容器
+docker pull zhoushu1/truthlens:latest       # 跟最新版（与 4.1 同步更新）
+netstat -ano | findstr 6655                 # Windows 查端口占用
+```
+
+| 现象 | 原因/办法 |
+|---|---|
+| `/health` 长时间不通 | 首次启动在加载 spaCy/向量模型，等 1~2 分钟再看日志 |
+| 上传文档失败 | 确认 `sentence-transformers` 模型能联网下载；国内服务器可在构建时用 `--build-arg HF_ENDPOINT=https://hf-mirror.com` |
+| 连不上数据库 | 单容器运行时 `DATABASE_URL` 必须指向容器可达地址（本机 PG 用 `host.docker.internal`，不要写 `localhost`） |
+| `latest` 和 `4.1` 哪个新 | 同一镜像的两个标签，内容一致；`latest` 永远跟随最新推送 |
+
+---
+
+## 🙏 致谢
+
+- 原作者 **[prajwalmandlecha](https://github.com/prajwalmandlecha)** 与原项目
+  [hallucinationdetection](https://github.com/prajwalmandlecha/hallucinationdetection)：
+  提供了完整的多源幻觉检测管线设计与前后端雏形，本分支站在它的肩膀上。
+- 本地向量化：[sentence-transformers](https://www.sbert.net/)（all-MiniLM-L6-v2）；命名实体：[spaCy](https://spacy.io/)。
+
+## 🆕 与原方案的差异（本分支新增 / 修改）
+
+1. **推理全面 API 化**：NLI 判定 / 声明提取 / 最终裁决 / 联网验证全部走第三方 API（Groq / Zen 网关 / Tavily / Serper），不再需要本地大模型与 GPU。
+2. **API Key 管理体系**：主 Key（`.env`）+ 数据库子 Key，兼容开放 / 强制鉴权两种模式，WebUI 自带 Key 管理页（创建、计数、吊销）。
+3. **OpenAI 兼容接口**：`GET /v1/models`、`POST /v1/chat/completions`（支持流式、provider 简写映射），外部系统零改代码即可调用。
+4. **WebUI 新增页面**：Settings 可视化配置（改 Key 落盘 `.env` + 热重载）、Analytics 仪表盘、API 文档页（含 curl/Python/JS 示例与在线试调用）。
+5. **缺陷修复**：
+   - 全局知识库文档上传 500（`documents.conversation_id` NOT NULL 未随模型改可空；新增 alembic 迁移 `003` + 启动自愈 DDL）；
+   - `/conversations/sync` 返回的 `total_messages` 漏算本次新增（计数先于 flush）；
+   - API 文档页 JSX 路径占位符被当成变量导致干净构建失败。
+6. **部署生产化**：CPU 瘦身镜像（torch 换 CPU wheel、去 CUDA，镜像约 2.48GB，容器监听 `0.0.0.0:6655`）、compose 去掉 GPU 保留段、GitHub Actions push 自动构建并推送 Docker Hub（`zhoushu1/truthlens:4.1` + `:latest`）。
+7. **测试资产**：中文全面测试报告（`全面测试报告_2026-09-05.md`）与可复用脚本（`api_full_smoke_test*.py`、`api_auth_enforcement_test.py`、`verify_fixes.py`）。
+
+---
+
 ## 📋 Table of Contents
 
 - [Overview](#overview)
@@ -208,15 +350,31 @@ The adjudicator catches nuanced contradictions, understands temporal shifts, fla
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` | Health check |
-| `GET` | `/api/v1/models` | List all available LLM models |
+| `GET` | `/api/v1/models` | List all available LLM models (native format) |
 | `POST` | `/api/v1/detect` | Main hallucination detection — accepts AI response + context, returns full analysis |
 | `POST` | `/api/v1/chat` | Proxy to LLM APIs — forwards user message to selected model, supports SSE streaming |
 | `POST` | `/api/v1/documents/upload` | Upload document → chunk → natively embed via SentenceTransformers → store in pgvector |
-| `GET` | `/api/v1/documents/{id}` | Get document metadata |
-| `DELETE` | `/api/v1/documents/{id}` | Delete document and its embeddings |
+| `GET` | `/api/v1/documents/{doc_id}` | Get document metadata |
+| `DELETE` | `/api/v1/documents/{doc_id}` | Delete document and its embeddings |
 | `POST` | `/api/v1/conversations` | Create a new conversation context |
-| `GET` | `/api/v1/conversations/{id}` | Get conversation with messages |
-| `POST` | `/api/v1/conversations/{id}/messages` | Add messages to a conversation |
+| `GET` | `/api/v1/conversations/{conv_id}` | Get conversation with messages |
+| `POST` | `/api/v1/conversations/{conv_id}/messages` | Add messages to a conversation |
+| `GET` | `/v1/models` | OpenAI-compatible model list |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions (streaming supported) |
+| `GET` | `/api/v1/documents` | List documents (`?conversation_id=` or `?global_only=true`) |
+| `GET` | `/api/v1/conversations` | List conversations |
+| `DELETE` | `/api/v1/conversations/{conv_id}` | Delete conversation and related records |
+| `POST` | `/api/v1/conversations/sync` | Sync messages from external platform / extension |
+| `GET` | `/api/v1/analytics/overview` | Analytics dashboard overview (`?days=7`) |
+| `GET` | `/api/v1/apikeys/status` | API key / auth status |
+| `GET` | `/api/v1/apikeys` | List sub keys (no plaintext) |
+| `POST` | `/api/v1/apikeys` | Create a sub key (plaintext returned once) |
+| `DELETE` | `/api/v1/apikeys/{key_id}` | Revoke a sub key |
+| `GET` | `/api/v1/settings/schema` | Settings schema for WebUI rendering |
+| `GET` | `/api/v1/settings/status` | Configured status (masked) + effective summary |
+| `PUT` | `/api/v1/settings` | Save settings and hot-reload |
+| `POST` | `/api/v1/settings/effective` | Query whether saved settings are effective |
+| `POST` | `/api/v1/settings/test` | Test a provider key / URL connectivity |
 
 #### `POST /api/v1/detect` — Request
 

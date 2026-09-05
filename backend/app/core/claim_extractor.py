@@ -22,9 +22,17 @@ logger = logging.getLogger(__name__)
 
 CLAIM_EXTRACTION_PROMPT = """You are a precise claim extraction system. Your job is to analyze an AI-generated response and extract every individual factual claim that can be independently verified.
 
+## LANGUAGE (HIGHEST PRIORITY — overrides everything below)
+- Detect the language of the AI's response FIRST.
+- The "text" field MUST be written in that SAME language. Chinese response → "text" in Simplified Chinese. English response → "text" in English. NEVER translate a Chinese response into English claims.
+- "exact_quote" is always the verbatim substring (same language as response, by definition).
+- JSON keys, "domain", "suggested_sources" stay in English.
+- "search_queries": use English for scientific/technical topics, otherwise the response language.
+
 ## Instructions
 
-1. Extract each factual claim as a **standalone assertion** that can be verified independently (stored in "text"). 
+1. Extract each factual claim as a **standalone assertion** that can be verified independently (stored in "text").
+   **LANGUAGE RULE**: Write "text" in the SAME language as the AI's response — see LANGUAGE section at the top, it has the highest priority. JSON keys, "domain", and "suggested_sources" stay in English. "search_queries" should be in English whenever the claim involves scientific/technical topics (for better retrieval), otherwise match the response language.
 2. **CRITICAL**: For every claim, you MUST extract the exact, strictly matching verbal substring from the AI's response that corresponds to this claim (stored in "exact_quote"). This will be used for exact text highlighting in the UI.
 3. Classify each claim by **domain** (see domain list below).
 4. For opinion claims: extract them if they are stated as objective fact (e.g., "X is the best") — classify as "opinion_subjective". Skip clearly hedged opinions ("I think", "it's possible").
@@ -58,7 +66,8 @@ Return ONLY valid JSON with this exact structure:
   "claims": [
     {
       "id": "c1",
-      "text": "The exact factual claim as a standalone assertion",
+      "text": "The exact factual claim as a standalone assertion (SAME language as response)",
+      "text_en": "English translation of the claim (if text is already English, repeat it verbatim)",
       "exact_quote": "The exact verbatim phrase from the original response",
       "citation_indices": [1, 2],
       "domain": "medical_health",
@@ -83,8 +92,8 @@ EXTRACTION_PROVIDERS = [
         "name": "groq",
         "base_url": "https://api.groq.com/openai/v1",
         "api_key_field": "groq_api_key",
-        "model": "llama-3.3-70b-versatile",
-        "description": "Groq Llama 3.3 70B — fastest free option (~500 tok/s)",
+        "model": "openai/gpt-oss-20b",
+        "description": "Groq gpt-oss 20B — fast free option, good JSON output",
     },
     {
         "name": "nvidia",
@@ -127,6 +136,10 @@ class ClaimExtractor:
                 )
                 self.model_name = provider["model"]
                 self.provider_name = provider["name"]
+                # 设置页可覆盖模型名(留空=各通道默认)，改后热重载即生效
+                override = (getattr(settings, "claim_extraction_model", "") or "").strip()
+                if override:
+                    self.model_name = override
                 logger.info(f"Claim extraction: using {provider['description']}")
                 break
 
@@ -230,6 +243,12 @@ class ClaimExtractor:
             response_format={"type": "json_object"},
             **extra_kwargs,
         )
+        # 记一次上游调用（成功才记，失败不记；内部已容错）
+        try:
+            from app.core.provider_usage import record_provider_call
+            await record_provider_call(self.provider_name or "unknown")
+        except Exception:
+            pass
         return response.choices[0].message.content
 
 
@@ -256,6 +275,7 @@ class ClaimExtractor:
                     claim = ExtractedClaim(
                         id=item.get("id", f"c{i + 1}"),
                         text=item.get("text", ""),
+                        text_en=item.get("text_en"),
                         exact_quote=item.get("exact_quote"),
                         citation_indices=item.get("citation_indices", []),
                         domain=self._parse_claim_domain(item.get("domain", "general_factual")),

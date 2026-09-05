@@ -13,6 +13,19 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+def _effective_model(provider: str, model_id: str) -> str:
+    """Zen 通道实际发给网关的模型名：永远跟随设置里的 ZEN_MODEL。
+
+    下拉框传来的 id 固定是 "mimo-v2.5"(历史会话兼容)，真正出站时替换，
+    这样设置页改名后聊天/外部API调用立刻同步，无需重启。
+    """
+    if provider == "zen":
+        custom = (get_settings().zen_model or "").strip()
+        if custom:
+            return custom
+    return model_id
+
+
 class LLMClient:
     def __init__(self):
         self.settings = get_settings()
@@ -40,6 +53,10 @@ class LLMClient:
             "openrouter": {
                 "base_url": "https://openrouter.ai/api/v1",
                 "api_key": self.settings.openrouter_api_key,
+            },
+            "zen": {
+                "base_url": self.settings.zen_base_url,
+                "api_key": self.settings.zen_api_key,
             },
         }
 
@@ -79,7 +96,7 @@ class LLMClient:
         provider = model_info["provider"]
         history = conversation_history or []
 
-        if provider in ("groq", "nvidia", "openrouter"):
+        if provider in ("groq", "nvidia", "openrouter", "zen"):
             return await self._chat_openai_compatible(provider, model_id, message, history)
         else:
             raise ValueError(f"Unknown provider: {provider}")
@@ -101,7 +118,7 @@ class LLMClient:
         provider = model_info["provider"]
         history = conversation_history or []
 
-        if provider in ("groq", "nvidia", "openrouter"):
+        if provider in ("groq", "nvidia", "openrouter", "zen"):
             async for chunk in self._stream_openai_compatible(provider, model_id, message, history):
                 yield chunk
 
@@ -125,10 +142,15 @@ class LLMClient:
             }
 
         response = await client.chat.completions.create(
-            model=model_id,
+            model=_effective_model(provider, model_id),
             messages=messages,
             **extra_kwargs,
         )
+        try:
+            from app.core.provider_usage import record_provider_call
+            await record_provider_call(provider)
+        except Exception:
+            pass
         return response.choices[0].message.content
 
     async def _stream_openai_compatible(
@@ -149,11 +171,16 @@ class LLMClient:
             }
 
         stream = await client.chat.completions.create(
-            model=model_id,
+            model=_effective_model(provider, model_id),
             messages=messages,
             stream=True,
             **extra_kwargs,
         )
+        try:
+            from app.core.provider_usage import record_provider_call
+            await record_provider_call(provider)
+        except Exception:
+            pass
         async for chunk in stream:
             if chunk.choices and chunk.choices[0].delta.content:
                 yield chunk.choices[0].delta.content

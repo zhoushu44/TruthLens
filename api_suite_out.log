@@ -1,0 +1,83 @@
+[PASS] GET /health  HTTP 200
+[PASS] health components  nli=True web=True models=10
+[PASS] GET /docs (Swagger)  HTTP 200
+[PASS] GET /openapi.json  HTTP 200
+[PASS] GET /v1/models (OpenAI ����)  HTTP 200
+[PASS] ����ģ����  3: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'mimo-v2.5']
+[PASS] GET /api/v1/models (����)  HTTP 200
+[PASS] GET /apikeys/status  HTTP 200
+[PASS] apikeys/status ����  master_configured=False api_key_required=False
+[PASS] GET /apikeys �б�  HTTP 200
+[PASS] POST /apikeys ����  prefix=tl-s5wDgpZ key��ͷ=tl-s5wDg��
+[PASS] Key ��ʽ tl- ǰ׺  HTTP 200
+[PASS] ����Key���� /v1/models ����  HTTP 200
+[PASS] usage_count �ѵ���  HTTP 200
+[PASS] ��ЧKey(����ģʽ) ����  HTTP 200
+[PASS] GET /settings/schema  HTTP 200
+[PASS] schema ����  items=12 categories=['�Ի���������ȡ', '�þ�(����)', '����������֤', 'ģ��΢��']
+[PASS] GET /settings/status  HTTP 200
+[PASS] settings/status effective  claim_ready=True adj=zen/openai-compatible chat_models=3
+[PASS] POST /settings/effective  HTTP 200
+[PASS] settings/test GROQ(�ѱ���ֵ)  HTTP 200
+[PASS] settings/test TAVILY(�ѱ���ֵ)  HTTP 200
+[PASS] settings/test ZEN_BASE_URL  HTTP 200
+[PASS] settings/test ����ݸ�Key Ӧʧ��  HTTP 200
+[PASS] settings/test GEMINI(δ����) Ӧʧ��  HTTP 200
+[PASS] settings/test δ֪Key Ӧʧ��  HTTP 200
+[PASS] POST /conversations ����  id=bbdfb4e8-8fa2-4137-ba9d-c6728f08f219
+[PASS] GET /conversations �б����½�  HTTP 200
+[PASS] POST messages (user)  HTTP 200
+[PASS] POST messages (assistant)  HTTP 200
+[PASS] GET /conversations/{id} ��2����Ϣ  HTTP 200
+[FAIL] POST /conversations/sync ����2��  HTTP 200 {'conversation_id': 'f9a73fe1-edb5-463c-ae85-e13171cf8eeb', 'platform': 'chatgpt', 'external_id': 'ext-d17c5e56', 'messages_synced': 2, 'total_messages': 0, 'document_ids': []} 
+[FAIL] POST /conversations/sync �ݵ�+����(ֻ����1��)  HTTP 200 {'conversation_id': 'f9a73fe1-edb5-463c-ae85-e13171cf8eeb', 'platform': 'chatgpt', 'external_id': 'ext-d17c5e56', 'messages_synced': 1, 'total_messages': 2, 'document_ids': []} 
+[PASS] GET /documents �б�  HTTP 200
+[FAIL] POST /documents/upload  HTTP 500 Internal Server Error
+[PASS] ���ļ��ϴ�Ӧ 400  HTTP 400
+[PASS] GET /analytics/overview?days=7  HTTP 200
+[PASS] analytics �����ֶ�  ['days', 'generated_at', 'summary', 'models', 'timeline', 'api_keys', 'providers']
+[PASS] analytics days=0 Ӧ 422  HTTP 422
+[PASS] analytics days=91 Ӧ 422  HTTP 422
+[PASS] POST /api/v1/chat ����ʽ(��ʵLLM)  model=openai/gpt-oss-20b resp='OK'
+[PASS] POST /api/v1/chat ��ʽSSE  HTTP 200 �յ�chunk+������� 1s
+[PASS] δ֪ model_id Ӧ 400  HTTP 400
+[PASS] ��Keyģ�� gemini-3-flash-preview Ӧ 400  {"detail":"API key not configured for gemini"}
+[PASS] POST /v1/chat/completions ����ʽ  resp='OPENAI_OK'
+[PASS] POST /v1/chat/completions ��ʽ(OpenAI�ֿ�)  HTTP 200 1s
+[PASS] model='groq' ��дӳ��  HTTP 200
+[PASS] �� messages Ӧ 400  HTTP 400
+[FAIL] POST /detect ����+������֤  EXC log() got an unexpected keyword argument 'extra' (30s)
+[FAIL] POST /detect ��չ(extension)ģʽ  EXC log() got an unexpected keyword argument 'extra' (29s)
+[FAIL] detect �Ƿ� role Ӧ 422  HTTP 400 {'detail': 'Invalid request. Provide either:\n- model_response + conversation_history (frontend mode)\n- platform + conversation + messages[] (extension mode)'} 
+[PASS] DELETE /conversations/{id}  HTTP 200
+[FAIL] δ֪·�� 404  HTTP 200 <!doctype html>
+
+<html lang="en">
+
+  <head>
+
+    <meta charset="UTF-8" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <meta name="viewport" content="widt 
+
+======================================================================
+TOTAL=53  PASS=46  FAIL=7
+FAIL: POST /conversations/sync ����2�� | HTTP 200 {'conversation_id': 'f9a73fe1-edb5-463c-ae85-e13171cf8eeb', 'platform': 'chatgpt', 'external_id': 'ext-d17c5e56', 'messages_synced': 2, 'total_messages': 0, 'document_ids': []} 
+FAIL: POST /conversations/sync �ݵ�+����(ֻ����1��) | HTTP 200 {'conversation_id': 'f9a73fe1-edb5-463c-ae85-e13171cf8eeb', 'platform': 'chatgpt', 'external_id': 'ext-d17c5e56', 'messages_synced': 1, 'total_messages': 2, 'document_ids': []} 
+FAIL: POST /documents/upload | HTTP 500 Internal Server Error
+FAIL: POST /detect ����+������֤ | EXC log() got an unexpected keyword argument 'extra' (30s)
+FAIL: POST /detect ��չ(extension)ģʽ | EXC log() got an unexpected keyword argument 'extra' (29s)
+FAIL: detect �Ƿ� role Ӧ 422 | HTTP 400 {'detail': 'Invalid request. Provide either:\n- model_response + conversation_history (frontend mode)\n- platform + conversation + messages[] (extension mode)'} 
+FAIL: δ֪·�� 404 | HTTP 200 <!doctype html>
+
+<html lang="en">
+
+  <head>
+
+    <meta charset="UTF-8" />
+
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+    <meta name="viewport" content="widt 

@@ -1,4 +1,4 @@
-import { Plus, Eye, BookKey, BarChart2, Trash2 } from "lucide-react";
+import { Plus, Eye, BookKey, BarChart2, Trash2, KeyRound, BookOpen } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -14,6 +14,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import type { RiskLevel } from "./sidebar-item";
 import { SidebarItem } from "./sidebar-item";
+import { openProviderSettings } from "@/lib/api";
 
 interface Chat {
   id: string;
@@ -67,6 +68,28 @@ export function SidebarLayout({
             >
               <BarChart2 className="w-4 h-4 mr-0.5" />
               <span>Analytics</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                size="default"
+                onClick={() => onSelectChat("apikeys")}
+                isActive={activeChatId === "apikeys"}
+                className="text-sec hover:text-pri hover:bg-hover data-[active=true]:bg-hover data-[active=true]:text-amber-500 font-medium active:scale-[0.98] transition-all"
+              >
+                <KeyRound className="w-4 h-4 mr-0.5" />
+                <span>API Key</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                size="default"
+                onClick={() => onSelectChat("apidocs")}
+                isActive={activeChatId === "apidocs"}
+                className="text-sec hover:text-pri hover:bg-hover data-[active=true]:bg-hover data-[active=true]:text-amber-500 font-medium active:scale-[0.98] transition-all"
+              >
+                <BookOpen className="w-4 h-4 mr-0.5" />
+                <span>API 文档</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
@@ -135,8 +158,21 @@ export function SidebarLayout({
                 <BookKey className="w-[16px] h-[16px]" />
               </SidebarMenuButton>
             </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+                onClick={openProviderSettings}
+                title="模型与搜索 Key 设置"
+                className="w-10 h-10 flex justify-center items-center mx-auto text-mut hover:text-pri"
+              >
+                <KeyRound className="w-[16px] h-[16px]" />
+              </SidebarMenuButton>
+            </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );
 }
+
+
+
+
