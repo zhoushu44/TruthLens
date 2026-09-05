@@ -8,7 +8,7 @@
 #   * 触发分支：main 与 master（push 时触发，也支持手动 workflow_dispatch）
 #   * 镜像名：<DOCKER_HUB_USERNAME>/<当前GitHub仓库名>（自动小写，无需额外配置；
 #     请确保 Docker Hub 上已存在同名仓库，或允许 push 时自动创建）
-#   * 标签：固定 4.1 与 latest（同一镜像同时打两个 tag 并推送）
+#   * 标签：固定 4.2 与 latest（同一镜像同时打两个 tag 并推送）
 #   * 服务在容器内监听 0.0.0.0:${PORT:-6655}（见 backend/Dockerfile）
 #
 name: Docker Hub Build & Push
@@ -31,9 +31,17 @@ jobs:
   build-and-push:
     name: Build & push image
     runs-on: ubuntu-latest
-    # 两个 Secrets 必须存在，否则直接失败并提示（避免浪费构建时间）
-    if: ${{ secrets.DOCKER_HUB_USERNAME != '' && secrets.DOCKER_HUB_TOKEN != '' }}
     steps:
+      - name: Check required secrets
+        env:
+          HUB_USER: ${{ secrets.DOCKER_HUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
+        run: |
+          if [ -z "${HUB_USER}" ] || [ -z "${HUB_TOKEN}" ]; then
+            echo "::error::缺少 Secrets：请先在仓库 Settings → Secrets and variables → Actions 中添加 DOCKER_HUB_USERNAME 与 DOCKER_HUB_TOKEN 后再运行。"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -53,9 +61,9 @@ jobs:
         env:
           IMAGE: ${{ steps.image.outputs.image }}
         run: |
-          # 固定版本标签：同一镜像同时打 4.1 与 latest 两个 tag 并推送
+          # 固定版本标签：同一镜像同时打 4.2 与 latest 两个 tag 并推送
           TAGS=(
-            "${IMAGE}:4.1"
+            "${IMAGE}:4.2"
             "${IMAGE}:latest"
           )
 

@@ -26,7 +26,7 @@ A production-grade system that intercepts AI-generated responses, extracts claim
 
 ```bash
 # 拉镜像（4.1 与 latest 是同一镜像的两个标签）
-docker pull zhoushu1/truthlens:4.1
+docker pull zhoushu1/truthlens:4.2
 
 # 运行（把下面 xxx 换成你自己的 Key / 数据库地址）
 docker run -d --name truthlens --restart unless-stopped \
@@ -38,7 +38,7 @@ docker run -d --name truthlens --restart unless-stopped \
   -e ZEN_MODEL="mimo-v2.5" \
   -e TAVILY_API_KEY="xxx" \
   -e SERPER_API_KEY="xxx" \
-  zhoushu1/truthlens:4.1
+  zhoushu1/truthlens:4.2
 
 # 看日志，出现 "Server ready!" 即启动成功（首次启动要加载 spaCy/向量模型，多等半分钟）
 docker logs -f truthlens
@@ -143,7 +143,7 @@ netstat -ano | findstr 6655                 # Windows 查端口占用
    - 全局知识库文档上传 500（`documents.conversation_id` NOT NULL 未随模型改可空；新增 alembic 迁移 `003` + 启动自愈 DDL）；
    - `/conversations/sync` 返回的 `total_messages` 漏算本次新增（计数先于 flush）；
    - API 文档页 JSX 路径占位符被当成变量导致干净构建失败。
-6. **部署生产化**：CPU 瘦身镜像（torch 换 CPU wheel、去 CUDA，镜像约 2.48GB，容器监听 `0.0.0.0:6655`）、compose 去掉 GPU 保留段、GitHub Actions push 自动构建并推送 Docker Hub（`zhoushu1/truthlens:4.1` + `:latest`）。
+6. **部署生产化**：CPU 瘦身镜像（torch 换 CPU wheel、去 CUDA，镜像约 2.48GB，容器监听 `0.0.0.0:6655`）、compose 去掉 GPU 保留段、GitHub Actions push 自动构建并推送 Docker Hub（`zhoushu1/truthlens:4.2` + `:latest`）。
 7. **测试资产**：中文全面测试报告（`全面测试报告_2026-09-05.md`）与可复用脚本（`api_full_smoke_test*.py`、`api_auth_enforcement_test.py`、`verify_fixes.py`）。
 
 ---
