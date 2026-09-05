@@ -512,56 +512,108 @@ All supported models utilize **free-tier APIs**:
 
 ## Getting Started
 
+> The Chinese guide at the top is the primary runbook. This section is the same setup in short form.
+>
+> Database is **required**, but you do **not** need to install PostgreSQL manually:
+> `docker compose` provides a `pgvector/pgvector:pg16` database automatically.
+
 ### Prerequisites
 
-- **Python 3.13+**
-- **Docker & Docker Compose** (for PostgreSQL)
-- **NVIDIA GPU** with driver ≥ 556.12 (for CUDA 12.4 NLI inference)
-- **NVIDIA Container Toolkit** (for GPU passthrough in Docker)
-- **API Keys** :
-  - **Groq** — `console.groq.com` (Claim extraction + chat)
-  - **Tavily / Serper** (Web Search)
-  - **NVIDIA NIM** — `build.nvidia.com` (chat)
-  - **OpenRouter** — `openrouter.ai` (chat)
-  - **Gemini** — `aistudio.google.com` (Adjudication and Chat)
+- **Docker Desktop** with Docker Compose
+- Local backend development only: **Python 3.11**
+- Frontend development/build only: **Node 22 + npm**
+- API keys: at least one claim provider (`GROQ_API_KEY`, `NVIDIA_API_KEY`, or `OPENROUTER_API_KEY`); `TAVILY_API_KEY` recommended; Zen adjudication keys recommended
+- No GPU required: the current backend image runs CPU/API inference
 
-### Quick Start
+### Option A — Recommended: full stack with Docker Compose
 
 ```bash
-# 1. Clone the repository
-git clone <repo-url>
-cd AI_HallicunationDetectionSystem
+# 1. Configure keys
+cp backend/.env.example backend/.env
+# Edit backend/.env and fill in GROQ / ZEN / TAVILY / SERPER keys
 
-# 2. Start PostgreSQL with pgvector
+# 2. Start PostgreSQL + backend + WebUI
+docker compose up -d --build
+
+# 3. Watch logs and open the app
+docker compose logs -f backend
+# WebUI + API: http://localhost:6655
+# API docs: http://localhost:6655/docs
+```
+
+Database defaults created by Compose:
+
+```text
+user: detection_admin
+password: detection_pass
+database: ai_detection
+host port: 5433
+container port: 5432
+```
+
+From a database tool on your host, connect to `localhost:5433`.  
+Containers connect to the Compose service name `postgres:5432`.
+
+```bash
+# Stop while keeping database data
+docker compose down
+
+# Stop and reset database data
+docker compose down -v
+```
+
+### Option B — Single container from Docker Hub
+
+```bash
+docker pull zhoushu1/truthlens:4.4
+
+docker run -d --name truthlens --restart unless-stopped \
+  -p 6655:6655 \
+  -e DATABASE_URL="postgresql+asyncpg://detection_admin:detection_pass@host.docker.internal:5433/ai_detection" \
+  -e GROQ_API_KEY="xxx" \
+  -e ZEN_API_KEY="xxx" \
+  -e ZEN_BASE_URL="https://opencode.ai/zen/go/v1" \
+  -e ZEN_MODEL="mimo-v2.5" \
+  -e TAVILY_API_KEY="xxx" \
+  -e SERPER_API_KEY="xxx" \
+  zhoushu1/truthlens:4.4
+```
+
+Use `host.docker.internal`, not `localhost`, when the database runs on your host but the backend runs in Docker.
+
+### Option C — Local development without Docker backend
+
+```bash
+# 1. Start only the database
 docker compose up -d postgres
 
-# 3. Backend setup
+# 2. Backend
 cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1            # Windows
-
-# Install Dependencies 
 pip install -r requirements.txt
 python -m spacy download en_core_web_sm
-
-# 4. Configure environment
-cp .env.example .env
-# Edit .env with your API keys 
-
-# 5. Run database migrations
+copy .env.example .env                 # Windows; fill in API keys
 alembic upgrade head
+uvicorn app.main:app --host 0.0.0.0 --port 6655
 
-# 6. Start Backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-# API docs at http://localhost:8000/docs
+# 3. Frontend in another terminal
+cd frontend
+npm install
+npm run dev                            # dev server, usually http://localhost:5173
+npm run build                          # build output is served by backend on 6655
 ```
 
-### Docker (Full Stack with GPU)
+### Database note
+
+PostgreSQL is mandatory for detection, conversations, documents, analytics, document vector search, and API-key management.  
+If you start from a completely empty database volume, initialize the schema first:
 
 ```bash
-# Build and start everything (PostgreSQL + Backend with GPU)
-docker compose up --build
+# Local backend
+cd backend
+alembic upgrade head
 
-# Backend will be at http://localhost:8000
-# Requires NVIDIA Container Toolkit for GPU passthrough
+# Or inside the Compose backend container
+docker compose exec backend alembic upgrade head
 ```
